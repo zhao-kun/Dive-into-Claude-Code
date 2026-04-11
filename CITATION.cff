@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this work, please cite it as below."
+title: "Dive into Claude Code: The Design Space of Today's AI Agent System"
+# TODO: Update authors
+authors:
+  - name: "To be updated"
+date-released: 2026-04-11
+url: "https://github.com/XXX/Dive-into-ClaudeCode"
+license: CC-BY-NC-SA-4.0
+preferred-citation:
+  type: article
+  title: "Dive into Claude Code: The Design Space of Today's AI Agent System"
+  # TODO: Update authors
+  authors:
+    - name: "To be updated"
+  year: 2026
+  url: "https://arxiv.org/abs/XXXX.XXXXX"
