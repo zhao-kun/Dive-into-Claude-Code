@@ -10,7 +10,7 @@
   <a href="https://github.com/VILA-Lab/Dive-into-ClaudeCode/stargazers"><img src="https://img.shields.io/github/stars/VILA-Lab/Dive-into-ClaudeCode?style=social" alt="Stars"></a>
 </p>
 
-> **A source-level architectural analysis of Claude Code (v2.1.88, ~1,900 TypeScript files, ~512K lines of code), combined with a curated collection of community analyses, a design-space guide for agent builders, and a cross-system comparison matrix.**
+> **A source-level architectural analysis of Claude Code (v2.1.88, ~1,900 TypeScript files, ~512K lines of code), combined with a curated collection of community analyses, a design-space guide for agent builders, and cross-system comparisons.**
 
 <!-- TODO: Update author list -->
 **Authors:** _To be updated._
@@ -32,10 +32,23 @@
 
 ---
 
+## Reading Guide
+
+| If you are a... | Start here | Then read |
+|:----------------|:-----------|:----------|
+| **Agent Builder** | [Build Your Own Agent](./docs/build-your-own-agent.md) | [Architecture Deep Dive](./docs/architecture.md) |
+| **Security Researcher** | [Safety and Permissions](#safety-and-permissions) | [Architecture: Safety Layers](./docs/architecture.md#seven-independent-safety-layers) |
+| **Product Manager** | [Key Highlights](#key-highlights) | [Values and Principles](#values-and-design-principles) |
+| **Researcher** | [Full Paper (arXiv)](https://arxiv.org/abs/XXXX.XXXXX) | [Community Resources](#community-projects--research) |
+
+`1,884 files` ·  `~512K lines` ·  `v2.1.88` ·  `7 safety layers` ·  `5 compaction stages` ·  `54 tools` ·  `27 hook events` ·  `4 extension mechanisms` ·  `7 permission modes`
+
+---
+
 <details>
 <summary><b>Table of Contents</b></summary>
 
-**Core Analysis (from our report)**
+**From Our Report**
 - [Architecture at a Glance](#architecture-at-a-glance)
 - [Values and Design Principles](#values-and-design-principles)
 - [The Agentic Query Loop](#the-agentic-query-loop)
@@ -45,14 +58,10 @@
 - [Subagent Delegation](#subagent-delegation)
 - [Session Persistence](#session-persistence)
 
-**Expanded Content**
-- [Agent Architecture Comparison Matrix](#agent-architecture-comparison-matrix)
+**Beyond the Paper**
 - [Build Your Own AI Agent: A Design Guide](#build-your-own-ai-agent-a-design-guide)
-- [Key Numbers at a Glance](#key-numbers-at-a-glance)
-- [Reading Guide by Role](#reading-guide-by-role)
-- [Related Resources: Community Analysis](#related-resources-community-analysis)
+- [Community Projects & Research](#community-projects--research)
 - [Citation](#citation)
-- [License](#license)
 
 </details>
 
@@ -74,7 +83,7 @@ The system decomposes into **7 components** (User → Interfaces → Agent Loop 
 > [!NOTE]
 > For the full architectural deep dive -- 7 safety layers, 9-step turn pipeline, 5-layer compaction, and more -- see **[docs/architecture.md](./docs/architecture.md)**.
 
-<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
 ---
 
@@ -113,7 +122,7 @@ The architecture traces from **5 human values** through **13 design principles**
 
 The paper also applies a **sixth evaluative lens** -- long-term capability preservation -- citing evidence that developers who fully delegate to AI score 17% lower on comprehension tests.
 
-<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
 ---
 
@@ -142,7 +151,7 @@ The core is a **ReAct-pattern while-loop**: assemble context → call model → 
 
 </details>
 
-<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
 ---
 
@@ -170,7 +179,7 @@ The core is a **ReAct-pattern while-loop**: assemble context → call model → 
 
 </details>
 
-<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
 ---
 
@@ -195,7 +204,7 @@ The core is a **ReAct-pattern while-loop**: assemble context → call model → 
 
 </details>
 
-<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
 ---
 
@@ -218,7 +227,7 @@ The core is a **ReAct-pattern while-loop**: assemble context → call model → 
 
 </details>
 
-<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
 ---
 
@@ -241,7 +250,7 @@ The core is a **ReAct-pattern while-loop**: assemble context → call model → 
 
 </details>
 
-<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
 ---
 
@@ -258,29 +267,7 @@ Three channels: append-only JSONL transcripts, global prompt history, subagent s
 
 </details>
 
-<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
-
----
-
-## Agent Architecture Comparison Matrix
-
-How do different production agent systems answer the same design questions? Using the design-space framework from our report:
-
-| Design Dimension | Claude Code | SWE-Agent | OpenHands | Aider | Cursor |
-|:-----------------|:------------|:----------|:----------|:------|:-------|
-| **Reasoning placement** | Model reasons, harness enforces (1.6% AI) | Model reasons within ACI (Agent-Computer Interface) | Model + microagents with specialized roles | Model with edit-format innovation | Model integrated in IDE context |
-| **Execution engine** | Single `queryLoop` for all surfaces | Single agent loop per task | Event-driven runtime with action execution | CLI-based conversation loop | IDE-embedded, editor-aware |
-| **Safety posture** | Deny-first, 7 layers, ML classifier | Docker container isolation | Docker sandbox + confirmation prompts | Git rollback as safety net | IDE permission scoping |
-| **Context strategy** | 5-layer graduated compaction | Sliding window + ACI commands | Condensation with observation management | Repository map + chat history | IDE-aware, file-scoped context |
-| **Extensibility** | 4 mechanisms (hooks/skills/plugins/MCP) | Custom ACI commands | Microagents + custom tools | Repository conventions | IDE extensions + rules |
-| **Subagent model** | Isolated sidechain transcripts, 3 isolation modes | N/A (single agent) | Microagent delegation | N/A (single agent) | N/A (single agent) |
-| **Persistence** | Append-only JSONL, no permission restoration | Trajectory logging | Event stream persistence | Git history as persistence | IDE session state |
-| **Primary insight** | Harness is the moat | Interface design matters | Openness enables research | Simplicity scales | IDE integration is UX |
-
-> [!NOTE]
-> This comparison is based on publicly available documentation, papers, and source analysis. Different versions and configurations may exhibit different characteristics. We welcome corrections via issues or PRs.
-
-<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
 ---
 
@@ -301,63 +288,79 @@ Every production agent must navigate these six decisions:
 
 **Read the full guide: [docs/build-your-own-agent.md](./docs/build-your-own-agent.md)**
 
-<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
 ---
 
-## Key Numbers at a Glance
+## Community Projects & Research
 
-| Metric | Value | Significance |
-|:-------|:------|:-------------|
-| AI decision logic | **1.6%** of codebase | 98.4% is deterministic infrastructure |
-| TypeScript files analyzed | **~1,900** | ~512K lines of code (v2.1.88) |
-| Permission approval rate | **93%** | Users stop reviewing -- motivates restructured boundaries |
-| Safety layers | **7** independent | But share token-cost failure mode |
-| Compaction stages | **5** sequential | Cheapest first, last resort = full model summary |
-| Built-in tools | up to **54** | 19 unconditional, 35 feature-gated |
-| Hook events | **27** | Across 5 categories, 4 execution types |
-| Extension mechanisms | **4** | At graduated context costs (zero → high) |
-| Permission modes | **7** | From `plan` (lowest trust) to `bypassPermissions` (highest) |
-| Subagent token cost | **~7x** | vs. standard sessions; summary-only returns |
-| CVEs from pre-trust window | **5** | All share same architectural root cause |
-| Auto-approve at 750 sessions | **>40%** | Up from ~20% at <50 sessions (trust trajectory) |
-| Complexity increase (Cursor study) | **+40.7%** | Initial velocity spike dissipates by month 3 |
-| Comprehension test delta | **-17%** | Developers who fully delegate to AI |
+A curated map of the repos, reimplementations, and academic papers surrounding Claude Code's architecture.
 
-<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+### Architecture Analysis
 
----
+Deep dives into Claude Code's internal design.
 
-## Reading Guide by Role
+| Repository | Description |
+|:-----------|:------------|
+| [**ComeOnOliver/claude-code-analysis**](https://github.com/ComeOnOliver/claude-code-analysis) | Comprehensive reverse-engineering: source tree structure, module boundaries, tool inventories, and architectural patterns. |
+| [**alejandrobalderas/claude-code-from-source**](https://github.com/alejandrobalderas/claude-code-from-source) | 18-chapter technical book (~400 pages). All original pseudocode, no proprietary source. |
+| [**liuup/claude-code-analysis**](https://github.com/liuup/claude-code-analysis) | Chinese-language deep-dive — startup flow, query main loop, MCP integration, multi-agent architecture. |
+| [**sanbuphy/claude-code-source-code**](https://github.com/sanbuphy/claude-code-source-code) | Quadrilingual analysis (EN/JA/KO/ZH) — 10 domains, 75 reports. Covers telemetry, codenames, KAIROS, unreleased tools. |
+| [**cablate/claude-code-research**](https://github.com/cablate/claude-code-research) | Independent research on internals, Agent SDK, and related tooling. |
+| [**Yuyz0112/claude-code-reverse**](https://github.com/Yuyz0112/claude-code-reverse) | Visualize Claude Code's LLM interactions — log parser and visual tool to trace prompts, tool calls, and compaction. |
 
-| If you are a... | Start here | Then read |
-|:----------------|:-----------|:----------|
-| **Agent Builder** | [Build Your Own Agent Guide](./docs/build-your-own-agent.md) | [Architecture](./docs/architecture.md), [Comparison Matrix](#agent-architecture-comparison-matrix) |
-| **Security Researcher** | [Safety and Permissions](#safety-and-permissions) | [Architecture: Safety Layers](./docs/architecture.md#seven-independent-safety-layers) |
-| **Product Manager** | [Key Highlights](#key-highlights), [Key Numbers](#key-numbers-at-a-glance) | [Values and Principles](#values-and-design-principles) |
-| **Researcher** | [Full Paper (arXiv)](https://arxiv.org/abs/XXXX.XXXXX) | [Comparison Matrix](#agent-architecture-comparison-matrix), [Related Resources](./docs/related-resources.md) |
+### Open-Source Reimplementations
 
-<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+Clean-room rewrites and buildable research forks.
 
----
+| Repository | Description |
+|:-----------|:------------|
+| [**chauncygu/collection-claude-code-source-code**](https://github.com/chauncygu/collection-claude-code-source-code) | Meta-collection — claw-code (Rust, 30K+ stars), nano-claude-code (Python ~5K lines), and original source archive. |
+| [**777genius/claude-code-working**](https://github.com/777genius/claude-code-working) | Working reverse-engineered CLI. Runnable with Bun, 450+ chunk files, 30 feature flags polyfilled. |
+| [**T-Lab-CUHKSZ/claude-code**](https://github.com/T-Lab-CUHKSZ/claude-code) | CUHK-Shenzhen buildable research fork — reconstructed build system from raw TypeScript snapshot. |
+| [**ruvnet/open-claude-code**](https://github.com/ruvnet/open-claude-code) | Nightly auto-decompile rebuild — 903+ tests, 25 tools, 4 MCP transports, 6 permission modes. |
+| [**Enderfga/openclaw-claude-code**](https://github.com/Enderfga/openclaw-claude-code) | OpenClaw plugin — unified ISession interface for Claude/Codex/Gemini/Cursor. Multi-agent council. |
+| [**memaxo/claude_code_re**](https://github.com/memaxo/claude_code_re) | Reverse engineering from minified bundles — deobfuscation of the publicly distributed cli.js file. |
 
-## Related Resources: Community Analysis
+### Guides & Learning
 
-The Claude Code ecosystem has produced remarkable community analyses. Here are the highlights:
+Tutorials and hands-on learning paths.
 
-| Resource | What Makes It Valuable |
-|:---------|:----------------------|
-| [Marco Kotrotsos' 15-part series](https://kotrotsos.medium.com/claude-code-internals-part-1-high-level-architecture-9881c68c799f) | Most systematic pre-leak analysis of Claude Code internals |
-| [Alex Kim's post-leak analysis](https://alex000kim.com/posts/2026-03-31-claude-code-source-leak/) | Anti-distillation, frustration detection, ~250K wasted API calls/day |
-| [Haseeb Qureshi's cross-agent comparison](https://gist.github.com/Haseeb-Qureshi/2213cc0487ea71d62572a645d7582518) | Claude Code vs Codex vs Cline vs OpenCode architectures |
-| [shareAI-lab/learn-claude-code](https://github.com/shareAI-lab/learn-claude-code) | Build a nano Claude Code from scratch, step by step |
-| [ultraworkers/claw-code](https://github.com/ultraworkers/claw-code) | Rust reimplementation: 512K LoC TypeScript → ~20K lines Rust. 179K stars in 9 days. |
-| [George Sung's LLM traffic tracing](https://medium.com/@georgesung/tracing-claude-codes-llm-traffic-agentic-loop-sub-agents-tool-use-prompts-7796941806f5) | Complete system prompts and full API logs |
-| [Agiflow's prompt augmentation reverse engineering](https://agiflow.io/blog/claude-code-internals-reverse-engineering-prompt-augmentation/) | 5 augmentation mechanisms backed by actual network traces |
+| Repository | Description |
+|:-----------|:------------|
+| [**shareAI-lab/learn-claude-code**](https://github.com/shareAI-lab/learn-claude-code) | "Bash is all you need" — 19-chapter 0-to-1 course with runnable Python agents, web platform. ZH/EN/JA. |
+| [**FlorianBruniaux/claude-code-ultimate-guide**](https://github.com/FlorianBruniaux/claude-code-ultimate-guide) | Beginner-to-power-user guide with production-ready templates, agentic workflow guides, and cheatsheets. |
+| [**affaan-m/everything-claude-code**](https://github.com/affaan-m/everything-claude-code) | Agent harness optimization — skills, instincts, memory, security, and research-first development. 50K+ stars. |
 
-**See the full curated list: [docs/related-resources.md](./docs/related-resources.md)**
+### Blog Posts & Technical Articles
 
-<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+| Article | What Makes It Valuable |
+|:--------|:----------------------|
+| [Marco Kotrotsos — "Claude Code Internals" (15-part series)](https://kotrotsos.medium.com/claude-code-internals-part-1-high-level-architecture-9881c68c799f) | Most systematic pre-leak analysis. Architecture, agent loop, permissions, sub-agents, MCP, telemetry. |
+| [Alex Kim — "The Claude Code Source Leak"](https://alex000kim.com/posts/2026-03-31-claude-code-source-leak/) | Anti-distillation mechanisms, frustration detection, Undercover Mode, ~250K wasted API calls/day. |
+| [Haseeb Qureshi — Cross-agent architecture comparison](https://gist.github.com/Haseeb-Qureshi/2213cc0487ea71d62572a645d7582518) | Claude Code vs Codex vs Cline vs OpenCode — architecture-level comparison. |
+| [George Sung — "Tracing Claude Code's LLM Traffic"](https://medium.com/@georgesung/tracing-claude-codes-llm-traffic-agentic-loop-sub-agents-tool-use-prompts-7796941806f5) | Complete system prompts and full API logs. Discovered dual-model usage (Opus + Haiku). |
+| [Agiflow — "Reverse Engineering Prompt Augmentation"](https://agiflow.io/blog/claude-code-internals-reverse-engineering-prompt-augmentation/) | 5 prompt augmentation mechanisms backed by actual network traces. |
+| [Engineer's Codex — "Diving into the Source Code Leak"](https://read.engineerscodex.com/p/diving-into-claude-codes-source-code) | Modular system prompt, ~40 tools, 46K-line query engine, anti-distillation. |
+| [MindStudio — "Three-Layer Memory Architecture"](https://www.mindstudio.ai/blog/claude-code-source-leak-memory-architecture) | In-context memory, MEMORY.md pointer index, CLAUDE.md static config. Best single resource on memory. |
+
+### Related Academic Papers
+
+| Paper | Venue | Relevance |
+|:------|:------|:----------|
+| [Decoding the Configuration of AI Coding Agents](https://arxiv.org/abs/2511.09268) | arXiv | Empirical study of 328 Claude Code configuration files — SE concerns and co-occurrence patterns. |
+| [On the Use of Agentic Coding Manifests](https://arxiv.org/abs/2509.14744) | arXiv | Analyzed 253 CLAUDE.md files from 242 repos — structural patterns in operational commands. |
+| [Context Engineering for Multi-Agent Code Assistants](https://arxiv.org/abs/2508.08322) | arXiv | Multi-agent workflow combining multiple LLMs for code generation. |
+| [OpenHands: An Open Platform for AI Software Developers](https://arxiv.org/abs/2407.16741) | ICLR 2025 | Primary academic reference for open-source AI coding agents. |
+| [SWE-Agent: Agent-Computer Interfaces](https://arxiv.org/abs/2405.15793) | NeurIPS 2024 | Docker-based coding agent with custom agent-computer interface. |
+
+### How This Paper Differs
+
+> While the projects above focus on **engineering reverse-engineering** or **practical reimplementation**, this paper provides a **systematic values → principles → implementation** analytical framework — tracing five human values through thirteen design principles to specific source-level choices, and using OpenClaw comparison to reveal that cross-cutting integrative mechanisms, not modular features, are the true locus of engineering complexity.
+
+**See the full curated list with more resources: [docs/related-resources.md](./docs/related-resources.md)**
+
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
 ---
 
