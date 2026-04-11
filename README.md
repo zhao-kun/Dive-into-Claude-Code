@@ -10,420 +10,361 @@
   <a href="https://github.com/VILA-Lab/Dive-into-ClaudeCode/stargazers"><img src="https://img.shields.io/github/stars/VILA-Lab/Dive-into-ClaudeCode?style=social" alt="Stars"></a>
 </p>
 
-> **A source-level architectural analysis of Claude Code (v2.1.88, ~1,900 TypeScript files, ~512K lines of code), revealing the design patterns, engineering trade-offs, and system-level decisions that power one of the most capable AI coding agents in production.**
+> **A source-level architectural analysis of Claude Code (v2.1.88, ~1,900 TypeScript files, ~512K lines of code), combined with a curated collection of community analyses, a design-space guide for agent builders, and a cross-system comparison matrix.**
 
 <!-- TODO: Update author list -->
 **Authors:** _To be updated._
+
+> [!TIP]
+> **TL;DR** -- Only 1.6% of Claude Code's codebase is AI decision logic. The other 98.4% is deterministic infrastructure -- permission gates, context management, tool routing, and recovery logic. The agent loop is a simple while-loop; the real engineering complexity lives in the systems around it. This repo dissects that architecture and distills it into actionable design guidance for anyone building AI agent systems.
 
 ---
 
 ## Key Highlights
 
-- **98.4% Infrastructure, 1.6% AI** -- Only ~1.6% of Claude Code's codebase is AI decision logic. The vast majority is deterministic operational harness -- permission gates, tool routing, context management, and recovery logic.
-- **The Loop Is Simple; Everything Around It Is Not** -- The core agent loop is a straightforward while-loop (ReAct pattern). The real engineering complexity lives in the surrounding subsystems: a 7-mode permission system, a 5-layer context compaction pipeline, 4 extensibility mechanisms, subagent isolation, and append-only session storage.
-- **Five Human Values Drive Every Design Decision** -- The architecture traces from five values (human authority, safety, reliability, capability amplification, contextual adaptability) through 13 design principles to specific implementation choices.
-- **Defense in Depth -- But With Shared Failure Modes** -- Seven independent safety layers protect the system, but they share economic constraints (token costs). Commands exceeding 50 subcommands bypass security analysis entirely.
-- **The Pre-Trust Execution Window** -- Five patched CVEs share a root cause: hooks and MCP servers execute during initialization *before* the trust dialog appears, creating a structurally privileged attack window.
-- **Context Window as the Binding Constraint** -- The ~200K-token context window drives nearly every architectural decision. Five compaction layers, lazy-loaded instructions, deferred tool schemas, and summary-only subagent returns all exist because context is scarce.
-- **What Resists Reimplementation** -- A comparison with OpenClaw shows the agent loop is easy to replicate, but cross-cutting harness systems (hooks pipeline, auto-mode classifier, graduated compaction, worktree isolation) are largely absent.
+- **98.4% Infrastructure, 1.6% AI** -- The world's most prominent AI coding agent is overwhelmingly deterministic harness, not AI scaffolding.
+- **The Loop Is Simple; Everything Else Is Not** -- The core agent loop is a straightforward while-loop. The 7-mode permission system, 5-layer compaction pipeline, 4 extensibility mechanisms, subagent isolation, and append-only storage are where the complexity lives.
+- **Five Values Drive Every Design Decision** -- Human authority, safety, reliability, capability amplification, and contextual adaptability trace through 13 principles to specific implementation choices.
+- **Defense in Depth Has Shared Failure Modes** -- Seven independent safety layers, but they share token-cost constraints. 50+ subcommands bypass security analysis entirely.
+- **The Pre-Trust Execution Window** -- Five patched CVEs share one root cause: extensions execute *before* the trust dialog appears.
+- **Context Is the Binding Constraint** -- The ~200K-token window drives nearly every architectural decision in the system.
+- **What Resists Reimplementation** -- Comparing with OpenClaw: the loop is easy to copy; the cross-cutting harness (hooks, classifier, compaction, isolation) is not.
 
 ---
 
-## Table of Contents
+<details>
+<summary><b>Table of Contents</b></summary>
 
-- [Overview](#overview)
-- [Values, Design Principles, and the Design Space](#values-design-principles-and-the-design-space)
-- [Architecture Overview](#architecture-overview)
-- [Turn Execution: The Agentic Query Loop](#turn-execution-the-agentic-query-loop)
-- [Tool Authorization and Permission System](#tool-authorization-and-permission-system)
-- [Extensibility: MCP, Plugins, Skills, and Hooks](#extensibility-mcp-plugins-skills-and-hooks)
-- [Context Construction and Memory](#context-construction-and-memory)
-- [Subagent Delegation and Orchestration](#subagent-delegation-and-orchestration)
-- [Session Persistence and Recovery](#session-persistence-and-recovery)
-- [Comparative Analysis: Claude Code vs. OpenClaw](#comparative-analysis-claude-code-vs-openclaw)
-- [Discussion: Implications for Agent Builders](#discussion-implications-for-agent-builders)
+**Core Analysis (from our report)**
+- [Architecture at a Glance](#architecture-at-a-glance)
+- [Values and Design Principles](#values-and-design-principles)
+- [The Agentic Query Loop](#the-agentic-query-loop)
+- [Safety and Permissions](#safety-and-permissions)
+- [Extensibility](#extensibility)
+- [Context and Memory](#context-and-memory)
+- [Subagent Delegation](#subagent-delegation)
+- [Session Persistence](#session-persistence)
+
+**Expanded Content**
+- [Agent Architecture Comparison Matrix](#agent-architecture-comparison-matrix)
+- [Build Your Own AI Agent: A Design Guide](#build-your-own-ai-agent-a-design-guide)
+- [Key Numbers at a Glance](#key-numbers-at-a-glance)
+- [Reading Guide by Role](#reading-guide-by-role)
+- [Related Resources: Community Analysis](#related-resources-community-analysis)
 - [Citation](#citation)
 - [License](#license)
 
----
-
-## Overview
-
-Claude Code is an agentic coding tool released by Anthropic that can run shell commands, edit files, and call external services on behalf of the user. Despite growing adoption, Anthropic publishes user-facing documentation but not detailed architectural descriptions.
-
-This paper fills that gap through **source-level analysis** of the extracted TypeScript codebase (v2.1.88), supplemented by official Anthropic documentation and a comparison with [OpenClaw](https://github.com/anthropics/anthropic-cookbook/tree/main/misc/open_claw), an open-source project that mirrors Claude Code's structure.
-
-The analysis identifies **five human values** that motivate the architecture and traces them through **thirteen design principles** to specific implementation choices. It reveals that:
-
-- The core of the system is a simple while-loop that calls the model, runs tools, and repeats.
-- Most of the code, however, lives in the systems _around_ this loop.
-- The architecture strongly amplifies short-term capability but provides few mechanisms that explicitly preserve long-term human understanding and codebase coherence.
-
-The paper is organized in two parts: (1) a **design-space analysis** identifying recurring design questions that all coding agents must navigate, and (2) a **comparative calibration** with OpenClaw revealing which design commitments resist reimplementation.
+</details>
 
 ---
 
-## Values, Design Principles, and the Design Space
+## Architecture at a Glance
 
-The paper argues that production coding agents embed human values in their architectural choices. Claude Code's architecture is driven by **five human values**:
+Claude Code answers **four design questions** that every production coding agent must face:
 
-| Value | Core Idea | Architectural Consequence |
-|:------|:----------|:--------------------------|
-| **Human Decision Authority** | Humans retain ultimate control via a principal hierarchy (Anthropic > operators > users) | Deny-first evaluation, graduated trust spectrum, append-only audit state |
-| **Safety, Security, and Privacy** | The system protects even when human vigilance lapses | 7 independent safety layers, shell sandboxing, non-restoration of permissions on resume |
-| **Reliable Execution** | Does what the human meant, stays coherent over time | Gather-act-verify loop, 5-layer compaction pipeline, graceful recovery |
-| **Capability Amplification** | Materially increases what humans can accomplish | Deterministic infrastructure over decision scaffolding (98.4% harness, 1.6% AI logic) |
-| **Contextual Adaptability** | Fits the user's context; the relationship improves over time | 4-level CLAUDE.md hierarchy, graduated extensibility, evolving trust trajectories |
+| Question | Claude Code's Answer |
+|:---------|:---------------------|
+| Where does reasoning live? | Model reasons; harness enforces. ~1.6% AI, 98.4% infrastructure. |
+| How many execution engines? | One `queryLoop` for all interfaces (CLI, SDK, IDE). |
+| Default safety posture? | Deny-first: deny > ask > allow. Strictest rule wins. |
+| Binding resource constraint? | ~200K-token context window. 5 compaction layers before every model call. |
 
-A key empirical finding: when users approve 93% of permission prompts, the architectural response is not more warnings but **restructured boundaries** -- sandboxing and classifiers within which the agent works freely, rather than per-action approval that users stop reviewing.
+The system decomposes into **7 components** (User → Interfaces → Agent Loop → Permission System → Tools → State & Persistence → Execution Environment) across **5 layers** expanding into 21 subsystems.
 
-These values are operationalized through **13 design principles** (Table 1 in the paper), including deny-first with human escalation, graduated trust spectrum, defense in depth, externalized programmable policy, context as scarce resource, append-only durable state, and minimal scaffolding with maximal operational harness.
+> [!NOTE]
+> For the full architectural deep dive -- 7 safety layers, 9-step turn pipeline, 5-layer compaction, and more -- see **[docs/architecture.md](./docs/architecture.md)**.
+
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+
+---
+
+## Values and Design Principles
+
+The architecture traces from **5 human values** through **13 design principles** to implementation:
+
+| Value | Core Idea |
+|:------|:----------|
+| **Human Decision Authority** | Humans retain control via principal hierarchy. When 93% approval rate showed fatigue, response was restructured boundaries, not more warnings. |
+| **Safety, Security, Privacy** | System protects even when human vigilance lapses. 7 independent safety layers. |
+| **Reliable Execution** | Does what was meant. Gather-act-verify loop. Graceful recovery. |
+| **Capability Amplification** | "A Unix utility, not a product." 98.4% is deterministic infrastructure enabling the model. |
+| **Contextual Adaptability** | CLAUDE.md hierarchy, graduated extensibility, trust trajectories that evolve over time. |
 
 <details>
-<summary><b>The 13 Design Principles</b> (click to expand)</summary>
+<summary><b>The 13 Design Principles</b></summary>
 
-| Principle | Values Served | Design Question |
-|:----------|:-------------|:----------------|
-| Deny-first with human escalation | Authority, Safety | Should unrecognized actions be allowed, blocked, or escalated? |
-| Graduated trust spectrum | Authority, Adaptability | Fixed permission level, or a spectrum users traverse over time? |
-| Defense in depth with layered mechanisms | Safety, Authority, Reliability | Single safety boundary, or multiple overlapping ones? |
-| Externalized programmable policy | Safety, Authority, Adaptability | Hardcoded policy, or externalized configs with lifecycle hooks? |
-| Context as scarce resource with progressive management | Reliability, Capability | Single-pass truncation or graduated pipeline? |
-| Append-only durable state | Reliability, Authority | Mutable state, checkpoint snapshots, or append-only logs? |
-| Minimal scaffolding, maximal operational harness | Capability, Reliability | Invest in scaffolding-side reasoning, or operational infrastructure? |
-| Values over rules | Capability, Authority | Rigid decision procedures, or contextual judgment with deterministic guardrails? |
-| Composable multi-mechanism extensibility | Capability, Adaptability | One unified extension API, or layered mechanisms at different context costs? |
-| Reversibility-weighted risk assessment | Capability, Safety | Same oversight for all actions, or lighter for reversible ones? |
-| Transparent file-based configuration and memory | Adaptability, Authority | Opaque database, embedding-based retrieval, or user-visible files? |
-| Isolated subagent boundaries | Reliability, Safety, Capability | Subagents share parent context and permissions, or operate in isolation? |
-| Graceful recovery and resilience | Reliability, Capability | Fail hard on errors, or recover silently and reserve human attention for unrecoverable situations? |
+| Principle | Design Question |
+|:----------|:----------------|
+| Deny-first with human escalation | Should unrecognized actions be allowed, blocked, or escalated? |
+| Graduated trust spectrum | Fixed permission level, or spectrum users traverse over time? |
+| Defense in depth | Single safety boundary, or multiple overlapping ones? |
+| Externalized programmable policy | Hardcoded policy, or externalized configs with lifecycle hooks? |
+| Context as scarce resource | Single-pass truncation or graduated pipeline? |
+| Append-only durable state | Mutable state, snapshots, or append-only logs? |
+| Minimal scaffolding, maximal harness | Invest in scaffolding or operational infrastructure? |
+| Values over rules | Rigid procedures or contextual judgment with deterministic guardrails? |
+| Composable multi-mechanism extensibility | One API or layered mechanisms at different costs? |
+| Reversibility-weighted risk assessment | Same oversight for all, or lighter for reversible actions? |
+| Transparent file-based config and memory | Opaque DB, embeddings, or user-visible files? |
+| Isolated subagent boundaries | Shared context/permissions, or isolation? |
+| Graceful recovery and resilience | Fail hard, or recover silently? |
 
 </details>
 
-The paper also applies a sixth concern -- **long-term capability preservation** -- as an evaluative lens. Citing evidence that developers who fully delegate to AI score 17% lower on comprehension tests, the paper asks whether short-term amplification comes at the cost of long-term human understanding.
+The paper also applies a **sixth evaluative lens** -- long-term capability preservation -- citing evidence that developers who fully delegate to AI score 17% lower on comprehension tests.
+
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
 
 ---
 
-## Architecture Overview
-
-Claude Code's architecture answers **four recurring design questions** that every production coding agent must face:
-
-| Design Question | Claude Code's Answer | Alternative Approaches |
-|:----------------|:---------------------|:----------------------|
-| **Where does reasoning live?** | Model reasons; harness enforces. Only ~1.6% is AI decision logic. | LangGraph: explicit state graphs. Devin: multi-step planners. |
-| **How many execution engines?** | One single `queryLoop` function regardless of interface (CLI, SDK, IDE). | Mode-specific engines for different surfaces. |
-| **What is the default safety posture?** | Deny-first: deny rules evaluated before ask rules before allow rules. | Container isolation (SWE-Agent), git rollback (Aider). |
-| **What is the binding resource constraint?** | The ~200K-token context window. 5 compaction strategies run before every model call. | Compute budget, explicit scratchpad/working memory. |
-
-### High-Level System Structure
-
-The system decomposes into **7 functional components** (Figure 1 above):
-
-1. **User** -- Submits prompts, approves permissions, reviews output
-2. **Interfaces** -- Interactive CLI, headless CLI (`claude -p`), Agent SDK, IDE/Desktop/Browser
-3. **Agent Loop** -- The iterative cycle of model call, tool dispatch, and result collection (`queryLoop` async generator)
-4. **Permission System** -- Deny-first rule evaluation, auto-mode ML classifier, hook-based interception
-5. **Tools** -- Up to 54 built-in tools + MCP-provided tools, assembled via `assembleToolPool`
-6. **State & Persistence** -- Append-only JSONL session transcripts, global prompt history, subagent sidechains
-7. **Execution Environment** -- Shell with optional sandboxing, filesystem, web fetching, MCP connections
-
-All entry surfaces converge on the same agent loop -- the interactive CLI, headless CLI, Agent SDK, and IDE integration all flow through the same `queryLoop` function.
-
-### 5-Layer Subsystem Decomposition
-
-The 7-component model expands into **21 subsystems** across five layers:
-
-- **Surface Layer** -- Entry points and rendering (CLI, headless, SDK, IDE)
-- **Core Layer** -- Context assembly, agent loop, compaction pipeline, subagent spawning
-- **Safety/Action Layer** -- Permissions (7 modes), auto-mode classifier, hook pipeline (27 events), tool pool, shell sandbox
-- **State Layer** -- Runtime state, session persistence, CLAUDE.md + memory hierarchy, sidechain transcripts
-- **Backend Layer** -- Shell execution, MCP server connections, 42 tool subdirectories
-
----
-
-## Turn Execution: The Agentic Query Loop
+## The Agentic Query Loop
 
 <p align="center">
   <img src="./assets/iteration.png" width="60%" alt="Runtime turn flow">
 </p>
 
-The core loop follows the **ReAct pattern** (reason + act + observe) implemented as a **9-step pipeline** per turn:
+The core is a **ReAct-pattern while-loop**: assemble context → call model → dispatch tools → check permissions → execute → repeat. Implemented as an `AsyncGenerator` yielding streaming events.
 
-1. **Settings resolution** -- Load configuration
-2. **State initialization** -- Set up session state
-3. **Context assembly** -- Build the context window from 9 ordered sources
-4. **5 pre-model context shapers** -- Sequential compression pipeline
-5. **Model call** -- Send assembled context to Claude
-6. **Tool dispatch** -- Parse `tool_use` blocks from model response
-7. **Permission gate** -- Evaluate deny-first rules, classifier, hooks
-8. **Tool execution** -- Run approved actions
-9. **Stop condition evaluation** -- Check termination criteria
+**Before every model call**, five compaction shapers run sequentially (cheapest first): Budget Reduction → Snip → Microcompact → Context Collapse → Auto-Compact.
 
-### The 5 Pre-Model Context Shapers
+<details>
+<summary><b>More details: 9-step pipeline, recovery mechanisms, stop conditions</b></summary>
 
-Before *every* model call, five sequential shapers manage context pressure, applying the least disruptive compression first:
+**9-step pipeline per turn:** Settings resolution → State init → Context assembly → 5 pre-model shapers → Model call → Tool dispatch → Permission gate → Tool execution → Stop condition
 
-| Stage | Strategy | What It Handles |
-|:------|:---------|:----------------|
-| 1. **Budget Reduction** | Per-message size limits | Individual tool outputs that overflow size limits |
-| 2. **Snip** | Lightweight older-history trimming | Temporal depth (old conversation turns) |
-| 3. **Microcompact** | Fine-grained cache-aware compression | Cache overhead and prompt caching optimization |
-| 4. **Context Collapse** | Read-time virtual projection (does NOT mutate stored history) | Very long conversation histories |
-| 5. **Auto-Compact** | Full model-generated summary (last resort) | When all cheaper strategies are insufficient |
+**Two execution paths:**
+- `StreamingToolExecutor` -- begins executing tools as they stream in (latency optimization)
+- Fallback `runTools` -- classifies tools as concurrent-safe or exclusive
 
-### Execution Model and Recovery
+**Recovery:** Max output token escalation (3 retries), reactive compaction (once per turn), prompt-too-long handling, streaming fallback, fallback model
 
-- **Concurrent-read, serial-write**: The `StreamingToolExecutor` begins executing tools as they stream in, with a fallback `runTools` path
-- **Recovery mechanisms**: Max output tokens escalation (up to 3 retries), reactive compaction, prompt-too-long handling, streaming fallback, and a fallback model
-- **5 stop conditions**: No tool use, max turns, context overflow, hook intervention, explicit abort
+**5 stop conditions:** No tool use, max turns, context overflow, hook intervention, explicit abort
+
+</details>
+
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
 
 ---
 
-## Tool Authorization and Permission System
+## Safety and Permissions
 
 <p align="center">
-  <img src="./assets/permission.png" width="75%" alt="Permission gate overview">
+  <img src="./assets/permission.png" width="75%" alt="Permission gate">
 </p>
 
-### 7 Permission Modes
+**7 permission modes** form a graduated trust spectrum: `plan` → `default` → `acceptEdits` → `auto` (ML classifier) → `dontAsk` → `bypassPermissions` (+ internal `bubble`).
 
-The permission system implements a **graduated trust spectrum**:
+**Deny-first**: A broad deny *always* overrides a narrow allow. **7 independent safety layers** from tool pre-filtering through shell sandboxing to hook interception. Permissions are **never restored on resume** -- trust is re-established per session.
 
-| Mode | Behavior | Trust Level |
-|:-----|:---------|:------------|
-| `plan` | User approves all plans | Lowest |
-| `default` | Standard interactive approval | Low |
-| `acceptEdits` | File edits auto-approved, shell needs approval | Medium |
-| `auto` | ML classifier evaluates tool safety | High |
-| `dontAsk` | Minimal prompting | Higher |
-| `bypassPermissions` | Skips most prompts (safety-critical checks remain) | Highest |
-| `bubble` | Internal: subagent escalation to parent | (Special) |
+> [!WARNING]
+> **Shared failure modes:** Defense-in-depth degrades when layers share constraints. All safety layers share token economics -- commands exceeding 50 subcommands bypass security analysis entirely due to token cost.
 
-**Key design choice: deny-first evaluation.** A broad deny rule (e.g., "deny all shell commands") *cannot* be overridden by a narrow allow rule (e.g., "allow npm test"). The strictest rule always wins.
+<details>
+<summary><b>More details: authorization pipeline, auto-mode classifier, CVEs</b></summary>
 
-### 7 Independent Safety Layers
+**Authorization pipeline:** Pre-filtering (strip denied tools) → PreToolUse hooks → Deny-first rule evaluation → Permission handler (4 branches: coordinator, swarm worker, speculative classifier, interactive)
 
-A request must pass through all applicable layers -- any single layer can block it:
+**Auto-mode classifier** (`yoloClassifier.ts`): Separate LLM call with internal/external permission templates. Two-stage: fast-filter + chain-of-thought.
 
-1. **Tool pre-filtering** -- Blanket-denied tools removed from model's view entirely
-2. **Deny-first rule evaluation** -- Deny rules always take precedence
-3. **Permission mode constraints** -- Active mode determines baseline handling
-4. **Auto-mode ML classifier** -- Separate LLM call evaluating tool safety
-5. **Shell sandboxing** -- Filesystem and network isolation for shell commands
-6. **Non-restoration on resume** -- Session-scoped permissions never persist across session boundaries
-7. **Hook-based interception** -- PreToolUse hooks can modify or block actions
+**Pre-trust execution window:** 5 patched CVEs share root cause -- hooks and MCP servers execute during initialization *before* the trust dialog appears, creating a structurally privileged attack window outside the deny-first pipeline.
 
-### The Auto-Mode Classifier
+</details>
 
-The `yoloClassifier.ts` implements a two-stage ML-based safety evaluation using a base system prompt and separate permission templates for internal vs. external tools. This is a separate model call, providing an independent safety judgment beyond rule-based evaluation.
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
 
 ---
 
-## Extensibility: MCP, Plugins, Skills, and Hooks
+## Extensibility
 
 <p align="center">
-  <img src="./assets/extensibility.png" width="85%" alt="Extension mechanisms plug into the agent loop via three injection points: assemble(), model(), and execute()">
+  <img src="./assets/extensibility.png" width="85%" alt="Three injection points: assemble, model, execute">
 </p>
 
-Claude Code provides **four extension mechanisms**, deliberately ordered by context cost:
+**Four mechanisms at graduated context costs:** Hooks (zero) → Skills (low) → Plugins (medium) → MCP (high). Three injection points in the agent loop: **assemble()** (what the model sees), **model()** (what it can reach), **execute()** (whether/how actions run).
 
-| Mechanism | Context Cost | What It Provides |
-|:----------|:-------------|:----------------|
-| **Hooks** | Zero | 27 hook events across 5 categories. Shell commands, LLM-evaluated checks, HTTP webhooks, subagent verifiers. Can block, rewrite, or annotate tool requests. |
-| **Skills** | Low | SKILL.md files with YAML frontmatter. Domain-specific instructions injected via SkillTool meta-tool. |
-| **Plugins** | Medium | Packaging + distribution format. Accept 10 component types: commands, agents, skills, hooks, MCP servers, LSP servers, output styles, channels, settings, user config. |
-| **MCP Servers** | High | External tool integration via Model Context Protocol. Multiple transports (stdio, SSE, HTTP, WebSocket, SDK, IDE). |
+<details>
+<summary><b>More details: tool pool assembly, hook events, plugin components</b></summary>
 
-**Why four mechanisms?** Each trades deployment complexity for different extensibility at different context costs. Zero-context hooks can scale widely without touching the context window; high-context MCP is reserved for genuinely new tool surfaces.
+**Tool pool assembly** (5-step): Base enumeration (up to 54 tools) → Mode filtering → Deny pre-filtering → MCP integration → Deduplication
 
-### Tool Pool Assembly
+**27 hook events** across 5 categories with 4 execution types (shell, LLM-evaluated, webhook, subagent verifier)
 
-`assembleToolPool` runs a 5-step pipeline: base tool enumeration (up to 54 tools) -> mode filtering -> deny rule pre-filtering -> MCP integration -> deduplication.
+**Plugin manifest** accepts 10 component types: commands, agents, skills, hooks, MCP servers, LSP servers, output styles, channels, settings, user config
 
-### Three Injection Points in the Agent Loop
+**Skills:** SKILL.md with 15+ YAML frontmatter fields. Key difference -- SkillTool injects into current context; AgentTool spawns isolated context.
 
-Extensions can intervene at three stages:
-- **assemble()** -- What the model sees (tool schemas, context)
-- **model()** -- What the model can reach (available tools)
-- **execute()** -- Whether and how an action runs (permission, modification, blocking)
+</details>
+
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
 
 ---
 
-## Context Construction and Memory
+## Context and Memory
 
 <p align="center">
-  <img src="./assets/context.png" width="75%" alt="Context construction and memory hierarchy">
+  <img src="./assets/context.png" width="75%" alt="Context construction">
 </p>
 
-### 9 Ordered Context Sources
+**9 ordered sources** build the context window. CLAUDE.md instructions are delivered as **user context** (probabilistic compliance), not system prompt (deterministic). Memory is **file-based** (no vector DB) -- fully inspectable, editable, version-controllable.
 
-The context window is assembled from 9 sources, in order:
+<details>
+<summary><b>More details: CLAUDE.md hierarchy, compaction pipeline, memory retrieval</b></summary>
 
-1. System prompt
-2. Environment information
-3. CLAUDE.md hierarchy (4 levels)
-4. Path-scoped rules
-5. Auto-memory entries
-6. Tool metadata
-7. Conversation history
-8. Tool results
-9. Compact summaries
+**4-level CLAUDE.md hierarchy:** Managed (`/etc/`) → User (`~/.claude/`) → Project (`CLAUDE.md`, `.claude/rules/`) → Local (`CLAUDE.local.md`, gitignored)
 
-### The CLAUDE.md Hierarchy
+**5-layer compaction** (graduated lazy-degradation): Budget reduction → Snip → Microcompact → Context Collapse (read-time projection, non-destructive) → Auto-Compact (full model summary, last resort)
 
-Instructions are delivered through a **4-level hierarchy**:
+**Memory retrieval:** LLM-based scan of memory-file headers, selects up to 5 relevant files. No embeddings, no vector similarity.
 
-| Level | Path | Scope |
-|:------|:-----|:------|
-| Managed | `/etc/claude-code/CLAUDE.md` | System-wide (enterprise) |
-| User | `~/.claude/CLAUDE.md` | Per-user preferences |
-| Project | `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md` | Per-project conventions |
-| Local | `CLAUDE.local.md` | Personal overrides (gitignored) |
+</details>
 
-**Key design choice:** CLAUDE.md is delivered as *user context*, not system prompt -- compliance is probabilistic, not deterministic. Permission rules provide the deterministic enforcement layer.
-
-### File-Based Memory Over Vector DB
-
-Claude Code uses **file-based memory** rather than embeddings or vector databases:
-- Trades expressiveness for auditability, inspectability, and version-controllability
-- No vector similarity index; uses LLM-based scan of memory-file headers to select up to 5 relevant files
-- Users can directly inspect, edit, and version-control everything the agent sees
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
 
 ---
 
-## Subagent Delegation and Orchestration
+## Subagent Delegation
 
 <p align="center">
-  <img src="./assets/subagent.png" width="75%" alt="Subagent isolation and delegation">
+  <img src="./assets/subagent.png" width="75%" alt="Subagent architecture">
 </p>
 
-### 6 Built-in Subagent Types
+**6 built-in types** (Explore, Plan, General-purpose, Guide, Verification, Statusline) + custom agents via `.claude/agents/*.md`. **Sidechain transcripts**: only summaries return to parent (~7x token cost). Three isolation modes: worktree, remote, in-process. Coordination via POSIX `flock()`.
 
-| Type | Purpose |
-|:-----|:--------|
-| **Explore** | Fast codebase exploration |
-| **Plan** | Implementation strategy design |
-| **General-purpose** | Multi-step autonomous tasks |
-| **Claude Code Guide** | Documentation and help |
-| **Verification** | Work validation |
-| **Statusline-setup** | Configuration |
+<details>
+<summary><b>More details: SkillTool vs AgentTool, permission scoping, custom agents</b></summary>
 
-Custom subagents can be defined via `.claude/agents/*.md` files with YAML frontmatter.
+**SkillTool vs AgentTool:** SkillTool injects into current context (cheap). AgentTool spawns isolated context (expensive, but prevents context explosion).
 
-### Key Difference: AgentTool vs. SkillTool
+**Permission override:** Subagent `permissionMode` applies UNLESS parent is in `bypassPermissions`/`acceptEdits`/`auto` (explicit user decisions always take precedence).
 
-- **SkillTool** injects instructions into the *current* context window
-- **AgentTool** spawns a *new isolated* context window -- the key distinction
+**Custom agents:** YAML frontmatter supports tools, disallowedTools, model, effort, permissionMode, mcpServers, hooks, maxTurns, skills, memory scope, background flag, isolation mode.
 
-### 3 Isolation Modes
+</details>
 
-| Mode | Mechanism | Use Case |
-|:-----|:----------|:---------|
-| **Worktree** | Git worktree for filesystem isolation | Parallel modifications without conflicts |
-| **Remote** | Internal-only remote execution | Cloud-based execution |
-| **In-process** | Shared filesystem, isolated conversation | Default mode |
-
-### Sidechain Transcripts
-
-Each subagent writes its own `.jsonl` transcript file. Only the **summary** returns to the parent context -- the full conversation history never enters the parent window. This prevents context explosion (subagent sessions cost ~7x tokens of standard sessions).
-
-Multi-instance coordination uses **POSIX file locking** (`flock()`) -- zero external dependencies.
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
 
 ---
 
-## Session Persistence and Recovery
+## Session Persistence
 
-<p align="center">
-  <img src="./assets/session_compact.png" width="75%" alt="Session persistence and context compaction">
-</p>
+Three channels: append-only JSONL transcripts, global prompt history, subagent sidechains. **Permissions never restored on resume** -- trust is re-established per session. Design favors **auditability over query power**.
 
-### Three Independent Persistence Channels
+<details>
+<summary><b>More details: compact boundary chain patching, checkpoints</b></summary>
 
-| Channel | Format | Purpose |
-|:--------|:-------|:--------|
-| **Session transcripts** | Append-only JSONL | Full conversation history with chain patching |
-| **Global prompt history** | `history.jsonl` | Cross-session prompt recall |
-| **Subagent sidechains** | Separate JSONL per subagent | Isolated subagent histories |
+**Chain patching:** Compact boundaries record `headUuid`/`anchorUuid`/`tailUuid`. The session loader patches the message chain at read time. Nothing is destructively edited on disk.
 
-### Deliberate Safety Choice: Non-Restoration of Permissions
+**Checkpoints:** File-history checkpoints for `--rewind-files`, stored at `~/.claude/file-history/<sessionId>/`.
 
-**Resume and fork do NOT restore session-scoped permissions.** Trust is always re-established in the current session. This is a deliberate safety choice -- security state never persists implicitly across session boundaries.
+</details>
 
-### Design Philosophy: Auditability Over Query Power
-
-The append-only design means richer structured queries ("show me all tool calls that modified file X across sessions") require post-hoc reconstruction rather than direct lookup. The paper argues this trade-off is worthwhile: it preserves the ability to resume, fork, and audit sessions without modifying previously written state.
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
 
 ---
 
-## Comparative Analysis: Claude Code vs. OpenClaw
+## Agent Architecture Comparison Matrix
 
-The paper compares Claude Code with [OpenClaw](https://github.com/anthropics/anthropic-cookbook/tree/main/misc/open_claw) using a **three-zone framework**:
+How do different production agent systems answer the same design questions? Using the design-space framework from our report:
 
-| Zone | Meaning | Examples |
-|:-----|:--------|:--------|
-| **Parity** | Functioning mirror | Basic agent loop, tool dispatch, message handling |
-| **Partial** | Stubs or incomplete | Permission system (basic), context management (simple) |
-| **Absent** | No implementation | Hook pipeline (27 events), auto-mode classifier, plugin/skill system, worktree isolation, 5-layer compaction |
+| Design Dimension | Claude Code | SWE-Agent | OpenHands | Aider | Cursor |
+|:-----------------|:------------|:----------|:----------|:------|:-------|
+| **Reasoning placement** | Model reasons, harness enforces (1.6% AI) | Model reasons within ACI (Agent-Computer Interface) | Model + microagents with specialized roles | Model with edit-format innovation | Model integrated in IDE context |
+| **Execution engine** | Single `queryLoop` for all surfaces | Single agent loop per task | Event-driven runtime with action execution | CLI-based conversation loop | IDE-embedded, editor-aware |
+| **Safety posture** | Deny-first, 7 layers, ML classifier | Docker container isolation | Docker sandbox + confirmation prompts | Git rollback as safety net | IDE permission scoping |
+| **Context strategy** | 5-layer graduated compaction | Sliding window + ACI commands | Condensation with observation management | Repository map + chat history | IDE-aware, file-scoped context |
+| **Extensibility** | 4 mechanisms (hooks/skills/plugins/MCP) | Custom ACI commands | Microagents + custom tools | Repository conventions | IDE extensions + rules |
+| **Subagent model** | Isolated sidechain transcripts, 3 isolation modes | N/A (single agent) | Microagent delegation | N/A (single agent) | N/A (single agent) |
+| **Persistence** | Append-only JSONL, no permission restoration | Trajectory logging | Event stream persistence | Git history as persistence | IDE session state |
+| **Primary insight** | Harness is the moat | Interface design matters | Openness enables research | Simplicity scales | IDE integration is UX |
 
-### The Core Finding
+> [!NOTE]
+> This comparison is based on publicly available documentation, papers, and source analysis. Different versions and configurations may exhibit different characteristics. We welcome corrections via issues or PRs.
 
-> **The agent loop is straightforward to replicate. What resists reimplementation are the cross-cutting harness systems.**
-
-The absent subsystems share common characteristics:
-- Configuration-driven behavior change
-- Integrated safety mechanisms
-- Graduated resource management
-- Cross-cutting interaction effects
-
-This reveals that the **hardest design commitments to replicate are cross-cutting rather than modular** -- they span multiple subsystems and create emergent behaviors difficult to predict from any single component.
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
 
 ---
 
-## Discussion: Implications for Agent Builders
+## Build Your Own AI Agent: A Design Guide
 
-### Design Philosophy: "Minimal Scaffolding, Maximal Operational Harness"
+> Not a coding tutorial. A guide to the **design decisions** you must make, derived from architectural analysis.
 
-When frontier models converge in capability (top 3 within 1% on SWE-bench), the **quality of the operational harness becomes the principal differentiator**. This validates an architecture that invests in infrastructure over decision scaffolding.
+Every production agent must navigate these six decisions:
 
-### Value Tensions in Production
+| Decision | The Question | Key Insight |
+|:---------|:-------------|:------------|
+| [**Reasoning placement**](./docs/build-your-own-agent.md#decision-1-where-does-reasoning-live) | How much logic in the model vs. harness? | As models converge in capability, the harness becomes the differentiator. |
+| [**Safety posture**](./docs/build-your-own-agent.md#decision-2-what-is-your-safety-posture) | How do you prevent harmful actions? | Defense-in-depth fails when layers share failure modes. |
+| [**Context management**](./docs/build-your-own-agent.md#decision-3-how-do-you-manage-context) | What does the model see? | Design for context scarcity from day one. Graduated > single-pass. |
+| [**Extensibility**](./docs/build-your-own-agent.md#decision-4-how-do-you-handle-extensibility) | How do extensions plug in? | Not all extensions need to consume context tokens. |
+| [**Subagent architecture**](./docs/build-your-own-agent.md#decision-5-how-do-subagents-work) | Shared or isolated context? | Subagent sessions cost ~7x tokens. Summary-only returns are essential. |
+| [**Session persistence**](./docs/build-your-own-agent.md#decision-6-how-do-sessions-persist) | What carries over? | Never restore permissions on resume. Auditability > query power. |
 
-| Tension | Evidence |
-|:--------|:---------|
-| **Authority x Safety** | 93% approval rate = approval fatigue undermines vigilance |
-| **Safety x Capability** | Token economics -- 50-subcommand bypass skips security analysis |
-| **Adaptability x Safety** | CVEs from pre-trust initialization of hooks/MCP |
-| **Capability x Adaptability** | Proactivity = +12-18% tasks but -50% user preference |
-| **Capability x Reliability** | Bounded context prevents full codebase awareness |
+**Read the full guide: [docs/build-your-own-agent.md](./docs/build-your-own-agent.md)**
 
-### Practical Takeaways
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
 
-1. **Invest in infrastructure, not scaffolding** -- As models converge in capability, the harness is the differentiator
-2. **Treat context as the binding constraint** -- Build graduated compression pipelines, not single-pass truncation
-3. **Layer safety mechanisms independently** -- But be aware of shared failure modes (especially economic constraints)
-4. **Use graduated context-cost extensibility** -- Not all extensions need to consume context tokens
-5. **Deny-first is better than approval-based** -- Users approve 93% of prompts without reviewing them
-6. **Append-only persistence enables resume/fork/audit** -- The slight loss in query power is worth the flexibility
-7. **Isolate subagent contexts** -- Summary-only returns prevent context explosion
-8. **Mind the pre-trust execution window** -- Extension loading order relative to trust establishment is a real security concern
-9. **File-based memory trades expressiveness for auditability** -- Users can inspect and version-control everything
-10. **The sustainability gap is real** -- AI tools that amplify short-term productivity may erode long-term understanding
+---
 
-### Three Recurring Design Commitments
+## Key Numbers at a Glance
 
-Across all subsystems, three cross-cutting patterns recur:
-1. **Graduated layering over monolithic mechanisms** -- Safety, context, and extensibility all use stacked independent stages
-2. **Append-only designs favoring auditability over query power** -- Everything can be reconstructed; nothing is destructively edited
-3. **Model judgment within a deterministic harness** -- The model decides freely; the harness enforces boundaries
+| Metric | Value | Significance |
+|:-------|:------|:-------------|
+| AI decision logic | **1.6%** of codebase | 98.4% is deterministic infrastructure |
+| TypeScript files analyzed | **~1,900** | ~512K lines of code (v2.1.88) |
+| Permission approval rate | **93%** | Users stop reviewing -- motivates restructured boundaries |
+| Safety layers | **7** independent | But share token-cost failure mode |
+| Compaction stages | **5** sequential | Cheapest first, last resort = full model summary |
+| Built-in tools | up to **54** | 19 unconditional, 35 feature-gated |
+| Hook events | **27** | Across 5 categories, 4 execution types |
+| Extension mechanisms | **4** | At graduated context costs (zero → high) |
+| Permission modes | **7** | From `plan` (lowest trust) to `bypassPermissions` (highest) |
+| Subagent token cost | **~7x** | vs. standard sessions; summary-only returns |
+| CVEs from pre-trust window | **5** | All share same architectural root cause |
+| Auto-approve at 750 sessions | **>40%** | Up from ~20% at <50 sessions (trust trajectory) |
+| Complexity increase (Cursor study) | **+40.7%** | Initial velocity spike dissipates by month 3 |
+| Comprehension test delta | **-17%** | Developers who fully delegate to AI |
 
-### The Open Question
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
 
-> The most consequential open question is not how to add more autonomy, but **how to preserve human capability over time**. The architecture strongly amplifies short-term capability but provides few mechanisms that explicitly preserve long-term human understanding and codebase coherence.
+---
+
+## Reading Guide by Role
+
+| If you are a... | Start here | Then read |
+|:----------------|:-----------|:----------|
+| **Agent Builder** | [Build Your Own Agent Guide](./docs/build-your-own-agent.md) | [Architecture](./docs/architecture.md), [Comparison Matrix](#agent-architecture-comparison-matrix) |
+| **Security Researcher** | [Safety and Permissions](#safety-and-permissions) | [Architecture: Safety Layers](./docs/architecture.md#seven-independent-safety-layers) |
+| **Product Manager** | [Key Highlights](#key-highlights), [Key Numbers](#key-numbers-at-a-glance) | [Values and Principles](#values-and-design-principles) |
+| **Researcher** | [Full Paper (arXiv)](https://arxiv.org/abs/XXXX.XXXXX) | [Comparison Matrix](#agent-architecture-comparison-matrix), [Related Resources](./docs/related-resources.md) |
+
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
+
+---
+
+## Related Resources: Community Analysis
+
+The Claude Code ecosystem has produced remarkable community analyses. Here are the highlights:
+
+| Resource | What Makes It Valuable |
+|:---------|:----------------------|
+| [Marco Kotrotsos' 15-part series](https://kotrotsos.medium.com/claude-code-internals-part-1-high-level-architecture-9881c68c799f) | Most systematic pre-leak analysis of Claude Code internals |
+| [Alex Kim's post-leak analysis](https://alex000kim.com/posts/2026-03-31-claude-code-source-leak/) | Anti-distillation, frustration detection, ~250K wasted API calls/day |
+| [Haseeb Qureshi's cross-agent comparison](https://gist.github.com/Haseeb-Qureshi/2213cc0487ea71d62572a645d7582518) | Claude Code vs Codex vs Cline vs OpenCode architectures |
+| [shareAI-lab/learn-claude-code](https://github.com/shareAI-lab/learn-claude-code) | Build a nano Claude Code from scratch, step by step |
+| [ultraworkers/claw-code](https://github.com/ultraworkers/claw-code) | Rust reimplementation: 512K LoC TypeScript → ~20K lines Rust. 179K stars in 9 days. |
+| [George Sung's LLM traffic tracing](https://medium.com/@georgesung/tracing-claude-codes-llm-traffic-agentic-loop-sub-agents-tool-use-prompts-7796941806f5) | Complete system prompts and full API logs |
+| [Agiflow's prompt augmentation reverse engineering](https://agiflow.io/blog/claude-code-internals-reverse-engineering-prompt-augmentation/) | 5 augmentation mechanisms backed by actual network traces |
+
+**See the full curated list: [docs/related-resources.md](./docs/related-resources.md)**
+
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">Back to top</a></p>
 
 ---
 
 ## Citation
 
-If you find this work useful, please consider citing:
+<details>
+<summary>BibTeX</summary>
 
 ```bibtex
 @article{diveclaudecode2026,
@@ -434,9 +375,8 @@ If you find this work useful, please consider citing:
 }
 ```
 
----
+</details>
 
 ## License
 
 This work is licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
-# Dive-into-ClaudeCode
