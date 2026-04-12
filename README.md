@@ -65,7 +65,8 @@
 
 ---
 
-## Architecture at a Glance
+<details open>
+<summary><h2>Architecture at a Glance</h2></summary>
 
 Claude Code answers **four design questions** that every production coding agent must face:
 
@@ -76,20 +77,19 @@ Claude Code answers **four design questions** that every production coding agent
 | Default safety posture? | Deny-first: deny > ask > allow. Strictest rule wins. |
 | Binding resource constraint? | ~200K-token context window. 5 compaction layers before every model call. |
 
-The system decomposes into **7 components** (User → Interfaces → Agent Loop → Permission System → Tools → State & Persistence → Execution Environment) across **5 layers** expanding into 21 subsystems:
-
-<p align="center">
-  <img src="./assets/layered_architecture.png" width="90%" alt="5-layer subsystem decomposition: Surface, Core, Safety/Action, State, and Backend layers expanding into 21 subsystems">
-</p>
+The system decomposes into **7 components** (User → Interfaces → Agent Loop → Permission System → Tools → State & Persistence → Execution Environment) across **5 layers** expanding into 21 subsystems.
 
 > [!NOTE]
 > For the full architectural deep dive -- 7 safety layers, 9-step turn pipeline, 5-layer compaction, and more -- see **[docs/architecture.md](./docs/architecture.md)**.
+
+</details>
 
 <p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
 ---
 
-## Values and Design Principles
+<details open>
+<summary><h2>Values and Design Principles</h2></summary>
 
 The architecture traces from **5 human values** through **13 design principles** to implementation:
 
@@ -124,6 +124,8 @@ The architecture traces from **5 human values** through **13 design principles**
 
 The paper also applies a **sixth evaluative lens** -- long-term capability preservation -- citing evidence that developers who fully delegate to AI score 17% lower on comprehension tests.
 
+</details>
+
 <p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
 ---
@@ -155,7 +157,8 @@ The core is a **ReAct-pattern while-loop**: assemble context → call model → 
 
 ---
 
-## Safety and Permissions
+<details open>
+<summary><h2>Safety and Permissions</h2></summary>
 
 <p align="center">
   <img src="./assets/permission.png" width="75%" alt="Permission gate">
@@ -176,6 +179,8 @@ The core is a **ReAct-pattern while-loop**: assemble context → call model → 
 **Auto-mode classifier** (`yoloClassifier.ts`): Separate LLM call with internal/external permission templates. Two-stage: fast-filter + chain-of-thought.
 
 **Pre-trust execution window:** 5 patched CVEs share root cause -- hooks and MCP servers execute during initialization *before* the trust dialog appears, creating a structurally privileged attack window outside the deny-first pipeline.
+
+</details>
 
 </details>
 
@@ -206,16 +211,14 @@ The core is a **ReAct-pattern while-loop**: assemble context → call model → 
 
 ---
 
-## Context and Memory
+<details open>
+<summary><h2>Context and Memory</h2></summary>
 
 <p align="center">
   <img src="./assets/context.png" width="75%" alt="Context construction">
 </p>
 
 **9 ordered sources** build the context window. CLAUDE.md instructions are delivered as **user context** (probabilistic compliance), not system prompt (deterministic). Memory is **file-based** (no vector DB) -- fully inspectable, editable, version-controllable.
-
-<details>
-<summary><b>More details: CLAUDE.md hierarchy, compaction pipeline, memory retrieval</b></summary>
 
 **4-level CLAUDE.md hierarchy:** Managed (`/etc/`) → User (`~/.claude/`) → Project (`CLAUDE.md`, `.claude/rules/`) → Local (`CLAUDE.local.md`, gitignored)
 
