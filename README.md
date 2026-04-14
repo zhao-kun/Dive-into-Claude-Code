@@ -81,7 +81,7 @@ Claude Code answers **four design questions** that every production coding agent
 The system decomposes into **7 components** (User → Interfaces → Agent Loop → Permission System → Tools → State & Persistence → Execution Environment) across **5 layers** expanding into 21 subsystems.
 
 <p align="center">
-  <img src="./assets/layered_architecture.png" width="85%" alt="5-layer subsystem decomposition">
+  <img src="./assets/layered_architecture.png" width="92%" alt="5-layer subsystem decomposition">
 </p>
 
 > [!NOTE]
@@ -220,7 +220,7 @@ The core is a **ReAct-pattern while-loop**: assemble context → call model → 
 <summary><h2>Context and Memory</h2></summary>
 
 <p align="center">
-  <img src="./assets/context.png" width="75%" alt="Context construction">
+  <img src="./assets/context.png" width="85%" alt="Context construction">
 </p>
 
 **9 ordered sources** build the context window. CLAUDE.md instructions are delivered as **user context** (probabilistic compliance), not system prompt (deterministic). Memory is **file-based** (no vector DB) -- fully inspectable, editable, version-controllable.
