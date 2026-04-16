@@ -396,6 +396,11 @@ Tutorials and hands-on learning paths.
 <p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
 ---
+<p align="center">
+  <a href="https://star-history.com/#VILA-Lab/Dive-into-ClaudeCode&Date">
+    <img src="https://api.star-history.com/svg?repos=VILA-Lab/Dive-into-ClaudeCode&type=Date" width="90%" alt="Star History Chart">
+  </a>
+</p>
 
 ## Citation
 
@@ -411,6 +416,7 @@ Tutorials and hands-on learning paths.
 ```
 
 </details>
+
 
 ## License
 
