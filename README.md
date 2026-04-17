@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="./paper/Dive_into_Claude_Code.pdf"><img src="https://img.shields.io/badge/Paper-PDF-blue.svg?logo=adobeacrobatreader&logoColor=white" alt="Paper"></a>
-  <a href="https://arxiv.org/abs/XXXX.XXXXX"><img src="https://img.shields.io/badge/arXiv-XXXX.XXXXX-b31b1b.svg" alt="arXiv"></a>
+  <a href="https://arxiv.org/abs/2604.14228"><img src="https://img.shields.io/badge/arXiv-2604.14228-b31b1b.svg" alt="arXiv"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-CC--BY--NC--SA--4.0-lightgrey.svg" alt="License"></a>
   <a href="https://github.com/VILA-Lab/Dive-into-ClaudeCode/stargazers"><img src="https://img.shields.io/github/stars/VILA-Lab/Dive-into-ClaudeCode?style=social" alt="Stars"></a>
 </p>
@@ -37,6 +37,7 @@
 
 - [🛠️ Build Your Own AI Agent: A Design Guide](#build-your-own-ai-agent-a-design-guide)
 - [🌐 Community Projects & Research](#community-projects--research)
+- [🚀 Other Notable AI Agent Projects](#other-notable-ai-agent-projects)
 - [🔖 Citation](#citation)
 
 ---
@@ -58,7 +59,7 @@
 | **Agent Builder** | [Build Your Own Agent](./docs/build-your-own-agent.md) | [Architecture Deep Dive](./docs/architecture.md) |
 | **Security Researcher** | [Safety and Permissions](#safety-and-permissions) | [Architecture: Safety Layers](./docs/architecture.md#seven-independent-safety-layers) |
 | **Product Manager** | [Key Highlights](#key-highlights) | [Values and Principles](#values-and-design-principles) |
-| **Researcher** | [Full Paper (arXiv)](https://arxiv.org/abs/XXXX.XXXXX) | [Community Resources](#community-projects--research) |
+| **Researcher** | [Full Paper (arXiv)](https://arxiv.org/abs/2604.14228) | [Community Resources](#community-projects--research) |
 
 `1,884 files` ·  `~512K lines` ·  `v2.1.88` ·  `7 safety layers` ·  `5 compaction stages` ·  `54 tools` ·  `27 hook events` ·  `4 extension mechanisms` ·  `7 permission modes`
 
@@ -392,6 +393,23 @@ Tutorials and hands-on learning paths.
 > While the projects above focus on **engineering reverse-engineering** or **practical reimplementation**, this paper provides a **systematic values → principles → implementation** analytical framework — tracing five human values through thirteen design principles to specific source-level choices, and using OpenClaw comparison to reveal that cross-cutting integrative mechanisms, not modular features, are the true locus of engineering complexity.
 
 **See the full curated list with more resources: [docs/related-resources.md](./docs/related-resources.md)**
+
+<p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
+
+---
+
+## Other Notable AI Agent Projects
+
+Recently launched (2025–2026) open-source AI agent projects outside the Claude Code ecosystem.
+
+| Repository | Launch | Focus |
+|:-----------|:-------|:------|
+| [**openclaw/openclaw**](https://github.com/openclaw/openclaw) | Jan 2026 | Local-first personal AI assistant across messaging platforms. |
+| [**sst/opencode**](https://github.com/sst/opencode) | Jun 2025 | Provider-agnostic terminal coding agent. |
+| [**NousResearch/hermes-agent**](https://github.com/nousresearch/hermes-agent) | Feb 2026 | Self-improving personal agent with cross-session memory. |
+| [**666ghj/MiroFish**](https://github.com/666ghj/MiroFish) | Mar 2026 | Multi-agent swarm-intelligence simulation engine. |
+| [**MemPalace/mempalace**](https://github.com/MemPalace/mempalace) | 2026 | Local-first memory system for AI agents. |
+| [**multica-ai/multica**](https://github.com/multica-ai/multica) | 2026 | Managed-agents platform for task assignment and skill compounding. |
 
 <p align="right"><a href="#dive-into-claude-code-the-design-space-of-todays-ai-agent-system">↑ Back to top</a></p>
 
