@@ -430,6 +430,9 @@ Recently launched (2025–2026) open-source AI agent projects outside the Claude
   title={Dive into Claude Code: The Design Space of Today's and Future AI Agent Systems},
   author={Jiacheng Liu, Xiaohan Zhao, Xinyi Shang, and Zhiqiang Shen},
   year={2026},
+  eprint={2604.14228},
+  archivePrefix={arXiv},
+  primaryClass={cs.SE},
 }
 ```
 
