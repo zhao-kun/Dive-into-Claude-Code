@@ -63,6 +63,17 @@
 
 `1,884 files` ·  `~512K lines` ·  `v2.1.88` ·  `7 safety layers` ·  `5 compaction stages` ·  `54 tools` ·  `27 hook events` ·  `4 extension mechanisms` ·  `7 permission modes`
 
+## PDF to Markdown
+
+To export the paper PDF as normalized Markdown with consistent headings, paragraphs, and list formatting:
+
+```bash
+/usr/bin/python -m pip install -r requirements-pdf.txt
+/usr/bin/python scripts/pdf_to_markdown.py paper/Dive_into_Claude_Code.pdf paper/Dive_into_Claude_Code.md
+```
+
+The converter uses font-size heuristics to infer Markdown headings, merges wrapped paragraph lines, removes repeated page headers, footers, and page numbers, and inserts the paper diagrams at their matching figure captions using the repository assets.
+
 ---
 
 <details open>
