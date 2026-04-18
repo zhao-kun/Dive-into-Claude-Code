@@ -72,7 +72,7 @@ To export the paper PDF as normalized Markdown with consistent headings, paragra
 /usr/bin/python scripts/pdf_to_markdown.py paper/Dive_into_Claude_Code.pdf paper/Dive_into_Claude_Code.md
 ```
 
-The converter uses font-size heuristics to infer Markdown headings, merges wrapped paragraph lines, removes repeated page headers, footers, and page numbers, and inserts the paper diagrams at their matching figure captions using the repository assets.
+The converter uses font-size heuristics to infer Markdown headings, merges wrapped paragraph lines, removes repeated page headers, footers, and page numbers, and generically extracts figure regions into a sibling assets directory such as `paper/Dive_into_Claude_Code_assets/` before inserting those images at their matching figure captions.
 
 ---
 

@@ -24,7 +24,7 @@ BULLET_RE = re.compile(r"^(?:[-+*•])\s+(?P<content>.+)$")
 ORDERED_RE = re.compile(r"^(?P<index>\d+)[.)]\s+(?P<content>.+)$")
 SECTION_RE = re.compile(r"^\d+(?:\.\d+)*\s+")
 PAGE_NUMBER_RE = re.compile(r"^\d+$")
-FIGURE_CAPTION_RE = re.compile(r"^Figure\s+(?P<number>\d+)\b")
+FIGURE_CAPTION_RE = re.compile(r"^(?:Figure|Fig\.)\s*(?P<number>\d+)\b", re.IGNORECASE)
 LIGATURES = {
     "ﬁ": "fi",
     "ﬂ": "fl",
@@ -32,26 +32,29 @@ LIGATURES = {
     "ﬃ": "ffi",
     "ﬄ": "ffl",
 }
-FIGURE_IMAGE_PATHS = {
-    1: "../assets/main_structure.png",
-    2: "../assets/iteration.png",
-    3: "../assets/layered_architecture.png",
-    4: "../assets/permission.png",
-    5: "../assets/extensibility.png",
-    6: "../assets/context.png",
-    7: "../assets/subagent.png",
-    8: "../assets/session_compact.png",
-    9: "../assets/package_structure.png",
-}
 
 
 @dataclass(frozen=True)
 class Line:
     page_number: int
+    page_width: float
     page_height: float
     text: str
     size: float
     is_bold: bool
+    x0: float
+    x1: float
+    y0: float
+    y1: float
+
+
+@dataclass(frozen=True)
+class FigureCaption:
+    number: int
+    page_number: int
+    text: str
+    x0: float
+    x1: float
     y0: float
     y1: float
 
@@ -108,6 +111,7 @@ def extract_lines(pdf_path: Path) -> list[Line]:
     try:
         for page_index, page in enumerate(document):
             page_data = page.get_text("dict")
+            page_width = float(page.rect.width)
             page_height = float(page.rect.height)
             blocks = sorted(
                 (block for block in page_data.get("blocks", []) if block.get("type") == 0),
@@ -125,10 +129,13 @@ def extract_lines(pdf_path: Path) -> list[Line]:
                     lines.append(
                         Line(
                             page_number=page_index + 1,
+                            page_width=page_width,
                             page_height=page_height,
                             text=text,
                             size=weighted_average_size(spans),
                             is_bold=any(span_is_bold(span) for span in spans),
+                            x0=float(bbox[0]),
+                            x1=float(bbox[2]),
                             y0=float(bbox[1]),
                             y1=float(bbox[3]),
                         )
@@ -302,14 +309,276 @@ def normalize_heading_blocks(blocks: Sequence[str]) -> list[str]:
     return normalized
 
 
-def insert_figure_images(blocks: Sequence[str]) -> list[str]:
+def extract_figure_captions(lines: Sequence[Line]) -> list[FigureCaption]:
+    captions: list[FigureCaption] = []
+
+    for line in lines:
+        match = FIGURE_CAPTION_RE.match(line.text)
+        if not match:
+            continue
+
+        captions.append(
+            FigureCaption(
+                number=int(match.group("number")),
+                page_number=line.page_number,
+                text=line.text,
+                x0=line.x0,
+                x1=line.x1,
+                y0=line.y0,
+                y1=line.y1,
+            )
+        )
+
+    return captions
+
+
+def clamp_rect(rect: fitz.Rect, bounds: fitz.Rect) -> fitz.Rect:
+    return fitz.Rect(
+        max(rect.x0, bounds.x0),
+        max(rect.y0, bounds.y0),
+        min(rect.x1, bounds.x1),
+        min(rect.y1, bounds.y1),
+    )
+
+
+def find_non_white_bounds(
+    pixmap: fitz.Pixmap,
+    threshold: int = 245,
+    start_row: int = 0,
+    end_row: int | None = None,
+) -> tuple[int, int, int, int] | None:
+    width = pixmap.width
+    height = pixmap.height
+    channels = pixmap.n
+    if width == 0 or height == 0 or channels == 0:
+        return None
+
+    if end_row is None:
+        end_row = height
+    start_row = max(start_row, 0)
+    end_row = min(end_row, height)
+    if start_row >= end_row:
+        return None
+
+    samples = pixmap.samples
+    left = width
+    top = end_row
+    right = -1
+    bottom = -1
+
+    for y in range(start_row, end_row):
+        row_offset = y * pixmap.stride
+        for x in range(width):
+            offset = row_offset + x * channels
+            if channels >= 3:
+                pixel_values = samples[offset : offset + 3]
+            else:
+                pixel_values = samples[offset : offset + 1]
+
+            if any(value < threshold for value in pixel_values):
+                left = min(left, x)
+                top = min(top, y)
+                right = max(right, x)
+                bottom = max(bottom, y)
+
+    if right < left or bottom < top:
+        return None
+
+    padding = 8
+    return (
+        max(left - padding, 0),
+        max(top - padding, 0),
+        min(right + padding + 1, width),
+        min(bottom + padding + 1, height),
+    )
+
+
+def find_content_band(pixmap: fitz.Pixmap, threshold: int = 245) -> tuple[int, int] | None:
+    width = pixmap.width
+    height = pixmap.height
+    channels = pixmap.n
+    if width == 0 or height == 0 or channels == 0:
+        return None
+
+    min_ink_pixels = max(12, width // 80)
+    gap_tolerance = max(6, height // 120)
+    min_band_height = max(24, height // 16)
+    merge_tolerance = gap_tolerance * 2
+    samples = pixmap.samples
+    row_ink_counts: list[int] = []
+
+    for y in range(height):
+        row_offset = y * pixmap.stride
+        ink_pixels = 0
+        for x in range(width):
+            offset = row_offset + x * channels
+            if channels >= 3:
+                pixel_values = samples[offset : offset + 3]
+            else:
+                pixel_values = samples[offset : offset + 1]
+
+            if any(value < threshold for value in pixel_values):
+                ink_pixels += 1
+
+        row_ink_counts.append(ink_pixels)
+
+    raw_bands: list[tuple[int, int]] = []
+    start: int | None = None
+    gap = 0
+
+    for row_index, ink_pixels in enumerate(row_ink_counts):
+        if ink_pixels >= min_ink_pixels:
+            if start is None:
+                start = row_index
+            gap = 0
+            continue
+
+        if start is None:
+            continue
+
+        gap += 1
+        if gap > gap_tolerance:
+            end = row_index - gap
+            if end - start + 1 >= min_band_height:
+                raw_bands.append((start, end))
+            start = None
+            gap = 0
+
+    if start is not None:
+        end = height - 1
+        if end - start + 1 >= min_band_height:
+            raw_bands.append((start, end))
+
+    if not raw_bands:
+        return None
+
+    merged_bands: list[tuple[int, int]] = []
+    current_start, current_end = raw_bands[0]
+
+    for next_start, next_end in raw_bands[1:]:
+        if next_start - current_end - 1 <= merge_tolerance:
+            current_end = next_end
+            continue
+
+        merged_bands.append((current_start, current_end))
+        current_start, current_end = next_start, next_end
+
+    merged_bands.append((current_start, current_end))
+
+    return max(
+        merged_bands,
+        key=lambda band: (sum(row_ink_counts[band[0] : band[1] + 1]), band[1] - band[0], band[1]),
+    )
+
+
+def trim_clip_to_content(page: fitz.Page, clip_rect: fitz.Rect) -> fitz.Rect | None:
+    matrix = fitz.Matrix(2, 2)
+    pixmap = page.get_pixmap(matrix=matrix, clip=clip_rect, alpha=False)
+    bounds = find_non_white_bounds(pixmap)
+    if bounds is None:
+        return None
+
+    left, top, right, bottom = bounds
+    scale_x = clip_rect.width / max(pixmap.width, 1)
+    scale_y = clip_rect.height / max(pixmap.height, 1)
+    trimmed = fitz.Rect(
+        clip_rect.x0 + left * scale_x,
+        clip_rect.y0 + top * scale_y,
+        clip_rect.x0 + right * scale_x,
+        clip_rect.y0 + bottom * scale_y,
+    )
+    return clamp_rect(trimmed, page.rect)
+
+
+def figure_asset_dir(output_md: Path) -> Path:
+    return output_md.parent / f"{output_md.stem}_assets"
+
+
+def prepare_figure_asset_dir(output_md: Path) -> Path:
+    asset_dir = figure_asset_dir(output_md)
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    for existing_file in asset_dir.glob("figure-*.png"):
+        existing_file.unlink()
+    return asset_dir
+
+
+def locate_figure_rect(page: fitz.Page, caption: FigureCaption) -> fitz.Rect | None:
+    page_rect = page.rect
+    caption_top = max(caption.y0 - 4.0, 0.0)
+    initial_clip = clamp_rect(
+        fitz.Rect(24.0, 36.0, page_rect.x1 - 24.0, caption_top),
+        page_rect,
+    )
+    if initial_clip.height < 40 or initial_clip.width < 80:
+        return None
+
+    preview_scale = fitz.Matrix(1.5, 1.5)
+    preview_pixmap = page.get_pixmap(matrix=preview_scale, clip=initial_clip, alpha=False)
+    content_band = find_content_band(preview_pixmap)
+    if content_band is None:
+        return None
+
+    band_start, band_end = content_band
+    scale_y = initial_clip.height / max(preview_pixmap.height, 1)
+    figure_rect = fitz.Rect(
+        initial_clip.x0,
+        initial_clip.y0 + band_start * scale_y,
+        initial_clip.x1,
+        initial_clip.y0 + (band_end + 1) * scale_y,
+    )
+
+    trimmed_rect = trim_clip_to_content(page, figure_rect)
+    if trimmed_rect is None or trimmed_rect.height < 30 or trimmed_rect.width < 60:
+        return None
+    return trimmed_rect
+
+
+def extract_figure_images(
+    input_pdf: Path,
+    output_md: Path,
+    lines: Sequence[Line],
+) -> dict[int, str]:
+    captions = extract_figure_captions(lines)
+    if not captions:
+        asset_dir = figure_asset_dir(output_md)
+        if asset_dir.exists() and not any(asset_dir.iterdir()):
+            asset_dir.rmdir()
+        return {}
+
+    asset_dir = prepare_figure_asset_dir(output_md)
+    image_paths: dict[int, str] = {}
+    document = fitz.open(input_pdf)
+
+    try:
+        for caption in captions:
+            if caption.number in image_paths:
+                continue
+
+            page = document[caption.page_number - 1]
+            figure_rect = locate_figure_rect(page, caption)
+            if figure_rect is None:
+                continue
+
+            output_path = asset_dir / f"figure-{caption.number:02d}.png"
+            page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=figure_rect, alpha=False).save(output_path)
+            image_paths[caption.number] = output_path.relative_to(output_md.parent).as_posix()
+    finally:
+        document.close()
+
+    if not image_paths and not any(asset_dir.iterdir()):
+        asset_dir.rmdir()
+
+    return image_paths
+
+
+def insert_figure_images(blocks: Sequence[str], figure_image_paths: dict[int, str]) -> list[str]:
     with_images: list[str] = []
 
     for block in blocks:
         figure_match = FIGURE_CAPTION_RE.match(block)
         if figure_match:
             figure_number = int(figure_match.group("number"))
-            image_path = FIGURE_IMAGE_PATHS.get(figure_number)
+            image_path = figure_image_paths.get(figure_number)
             if image_path:
                 with_images.append(f"![{block}]({image_path})")
 
@@ -318,10 +587,11 @@ def insert_figure_images(blocks: Sequence[str]) -> list[str]:
     return with_images
 
 
-def render_markdown(lines: Sequence[Line]) -> str:
+def render_markdown(lines: Sequence[Line], figure_image_paths: dict[int, str] | None = None) -> str:
     cleaned_lines = remove_repeated_page_furniture(lines)
     body_size = body_font_size(cleaned_lines)
     heading_levels = heading_size_map(cleaned_lines, body_size)
+    figure_image_paths = figure_image_paths or {}
 
     blocks: list[str] = []
     paragraph_parts: list[str] = []
@@ -378,7 +648,7 @@ def render_markdown(lines: Sequence[Line]) -> str:
     flush_list_item()
 
     blocks = normalize_heading_blocks(blocks)
-    blocks = insert_figure_images(blocks)
+    blocks = insert_figure_images(blocks, figure_image_paths)
 
     content = "\n\n".join(block for block in blocks if block)
     content = MULTI_BLANK_RE.sub("\n\n", content).strip()
@@ -390,7 +660,9 @@ def convert_pdf_to_markdown(input_pdf: Path, output_md: Path) -> None:
         raise FileNotFoundError(f"Input PDF not found: {input_pdf}")
 
     extracted_lines = extract_lines(input_pdf)
-    markdown = render_markdown(extracted_lines)
+    cleaned_lines = remove_repeated_page_furniture(extracted_lines)
+    figure_image_paths = extract_figure_images(input_pdf, output_md, cleaned_lines)
+    markdown = render_markdown(extracted_lines, figure_image_paths)
     output_md.parent.mkdir(parents=True, exist_ok=True)
     output_md.write_text(markdown, encoding="utf-8")
 

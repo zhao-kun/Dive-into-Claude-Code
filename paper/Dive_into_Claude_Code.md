@@ -74,7 +74,7 @@ Permission System Propose Action Allow/Ask/Deny User Interfaces Request Tools Ag
 
 State & Persistence
 
-![Figure 1 High-level system structure of Claude Code. The system decomposes into seven functional components: user, interfaces, the agent loop, a permission system, tools, state & persistence, and an execution environment. All entry surfaces converge on the same agent loop.](../assets/main_structure.png)
+![Figure 1 High-level system structure of Claude Code. The system decomposes into seven functional components: user, interfaces, the agent loop, a permission system, tools, state & persistence, and an execution environment. All entry surfaces converge on the same agent loop.](Dive_into_Claude_Code_assets/figure-01.png)
 
 Figure 1 High-level system structure of Claude Code. The system decomposes into seven functional components: user, interfaces, the agent loop, a permission system, tools, state & persistence, and an execution environment. All entry surfaces converge on the same agent loop.
 
@@ -88,15 +88,17 @@ Figure 1 High-level system structure of Claude Code. The system decomposes into 
 
 - Contextual Adaptability motivates transparent file-based memory, composable extensibility, the graduated trust spectrum, and externalized programmable policy (Sections 5 to 7). These mappings also reveal what the architecture does not do: it does not impose explicit planning graphs on the model’s reasoning, does not provide a single unified extension mechanism, and does not restore all session-scoped trust-related state across resume. These absences are consistent with the principle set above.
 
-2.4 An Evaluative Lens: Long-term Capability Preservation The five values above describe what the architecture is designed to serve. This paper also applies a sixth concern, whether the architecture preserves long-term human capability, as an evaluative lens. This concern is real: Anthropic’s own study of 132 engineers and researchers (Huang et al., 2025) documents a “paradox of supervision” in which overreliance on AI risks atrophying the skills needed to supervise it, and independent research (Shen and Tamkin, 2026) finds that developers in AI-assisted conditions score 17% lower on comprehension tests. However, this concern is not prominently reflected as a design driver in the architecture or in Anthropic’s stated design values. We therefore treat it not as a co-equal value but as a cross-cutting concern: a question applied across all five values in Section 11, asking whether short-term amplification comes at the cost of long-term human understanding, codebase coherence, and the developer pipeline.
+2.4 An Evaluative Lens: Long-term Capability Preservation 
+
+The five values above describe what the architecture is designed to serve. This paper also applies a sixth concern, whether the architecture preserves long-term human capability, as an evaluative lens. This concern is real: Anthropic’s own study of 132 engineers and researchers (Huang et al., 2025) documents a “paradox of supervision” in which overreliance on AI risks atrophying the skills needed to supervise it, and independent research (Shen and Tamkin, 2026) finds that developers in AI-assisted conditions score 17% lower on comprehension tests. However, this concern is not prominently reflected as a design driver in the architecture or in Anthropic’s stated design values. We therefore treat it not as a co-equal value but as a cross-cutting concern: a question applied across all five values in Section 11, asking whether short-term amplification comes at the cost of long-term human understanding, codebase coherence, and the developer pipeline.
 
 ### 3 Architecture Overview
 
-Building a production coding agent requires answering several recurring design questions: where should reasoning live, how many execution engines are needed, what safety posture to adopt, and what resource to treat as the binding constraint. Claude Code’s architecture can be read as one set of answers to these questions. At the implementation level, the system has seven components connected by a main data flow: a user submits a prompt through one of several interfaces, which feeds into a shared agent loop. The agent loop assembles context, calls the Claude model, receives responses that may include tool-use requests, routes those requests through a permission system, and dispatches approved actions to concrete tools that interact with the execution environment. Throughout this process, state and persistence mechanisms record the conversation
+Building a production coding agent requires answering several recurring design questions: where should reasoning live, how many execution engines are needed, what safety posture to adopt, and what resource to treat as the binding constraint. Claude Code’s architecture can be read as one set of answers to these questions. At the implementation level, the system has seven components connected by a main data flow: a user submits a prompt through one of several interfaces, which feeds into a shared agent loop. The agent loop assembles context, calls the Claude model, receives responses that may include tool-use requests, routes those requests through a permission system, and dispatches approved actions to concrete tools that interact with the execution environment. Throughout this process, state and persistence mechanisms record the conversation transcript, manage session identity, and support resume, fork, and rewind operations.
 
-transcript, manage session identity, and support resume, fork, and rewind operations.
+#### 3.1 Design Questions and Running Example
 
-3.1 Design Questions and Running Example The description is organized around four design questions that recur across production coding agents, each grounding one or more of the design principles identified in Table 1. Each question is introduced here with Claude Code’s answer, a note on plausible alternatives, and then demonstrated progressively through Sections 4 to 9.
+The description is organized around four design questions that recur across production coding agents, each grounding one or more of the design principles identified in `Table 1`. Each question is introduced here with Claude Code’s answer, a note on plausible alternatives, and then demonstrated progressively through Sections 4 to 9.
 
 Where does reasoning live? In Claude Code, the model reasons about what to do; the harness is responsible for executing actions. The model emits tool_use blocks as part of its response, and the harness parses them, checks permissions, dispatches them to tool implementations, and collects results (query.ts). The model never directly accesses the filesystem, runs shell commands, or makes network requests. This separation has a security consequence: because reasoning and enforcement occupy separate code paths, a compromised or adversarially manipulated model cannot override the sandboxing, permission checks, or deny-first rules implemented in the harness. The model’s only interface to the outside world is the structured tool_use protocol, which the harness validates before execution. Community analysis of the extracted source estimates that only about 1.6% of Claude Code’s codebase constitutes AI decision logic, with the remaining 98.4% being operational infrastructure, a ratio that illustrates how thin the core agent reasoning layer is. Alternative designs invest more heavily in scaffolding-side reasoning: Devin maintains explicit planning and task-tracking structures, while LangGraph (LangChain, Inc., 2024) routes control flow through developer-defined state graphs.
 
@@ -108,101 +110,91 @@ What is the binding resource constraint? In Claude Code, the context window (200
 
 Running example. To ground these principles, we thread a single task through Sections 3 to 9: “Fix the failing test in auth.test.ts.” In this section the user submits the prompt through one of Claude Code’s interfaces. Subsequent sections trace the request through the query loop, permission gate, tool pool, context window, subagent delegation, and session persistence.
 
-User Prompt
-
-Context Assembly (settings, history)
-
-Tool Request Permission Iter 1 Allow Execute -> Result Sync | subagent | background Compact (context pressure)
-
-Tool Request Permission Iter 2 Deny More Iterations
-
-#### ···
-
-Deny Feedback
-
-No Tool Use Iter N
-
-Assistant Response User Reads & Replies
-
 ![Figure 2 Runtime turn flow showing the end-to-end execution of a single agentic turn: user prompt enters through context assembly, the model is called, tool requests pass through the permission gate, tool results feed back into the loop, and compaction manages context pressure.](../assets/iteration.png)
 
-Figure 2 Runtime turn flow showing the end-to-end execution of a single agentic turn: user prompt enters through context assembly, the model is called, tool requests pass through the permission gate, tool results feed back into the loop, and compaction manages context pressure.
+**Figure 2** Runtime turn flow showing the end-to-end execution of a single agentic turn: user prompt enters through context assembly, the model is called, tool requests pass through the permission gate, tool results feed back into the loop, and compaction manages context pressure.
 
-3.2 High-Level System Structure The seven-component model (Figure 1) maps directly to source files:
+#### 3.2 High-Level System Structure 
 
-1. User: Submits prompts, approves permissions, reviews output.
+The seven-component model (Figure 1) maps directly to source files:
 
-2. Interfaces: Interactive CLI, headless CLI (claude -p), Agent SDK, and IDE/Desktop/Browser. All surfaces feed the same loop.
+1. **User**: Submits prompts, approves permissions, reviews output.
 
-3. Agent loop: The iterative cycle of model call, tool dispatch, and result collection, implemented as the queryLoop() async generator in query.ts.
+2. **Interfaces**: Interactive CLI, headless CLI (claude -p), Agent SDK, and IDE/Desktop/Browser. All surfaces feed the same loop.
 
-4. Permission system: Deny-first rule evaluation (permissions.ts), the auto-mode ML classifier, and hook-based interception (types/hooks.ts).
+3. **Agent loop**: The iterative cycle of model call, tool dispatch, and result collection, implemented as the queryLoop() async generator in query.ts.
 
-5. Tools: Up to 54 built-in tools (19 unconditional, 35 conditional on feature flags and user type) assembled via assembleToolPool() (tools.ts), merged with MCP-provided tools. Plugins contribute indirectly through MCP servers and the skill/command registry.
+4. **Permission system**: Deny-first rule evaluation (permissions.ts), the auto-mode ML classifier, and hook-based interception (types/hooks.ts).
 
-6. State & persistence: Mostly append-only JSONL session transcripts (sessionStorage.ts), global prompt history (history.ts), and subagent sidechain files.
+5. **Tools**: Up to 54 built-in tools (19 unconditional, 35 conditional on feature flags and user type) assembled via assembleToolPool() (tools.ts), merged with MCP-provided tools. Plugins contribute indirectly through MCP servers and the skill/command registry.
 
-7. Execution environment: Shell execution with optional sandboxing (shouldUseSandbox.ts), filesystem operations, web fetching, MCP server connections, and remote execution. The data flow follows a left-to-right spine: the user submits a request through an interface, which enters the agent loop. The loop proposes actions to the permission system; approved actions reach tools, which interact with the execution environment and return tool_result messages back to the loop. State and persistence sit alongside the loop, recording transcripts and loading prior session data. The application entry point main() in main.tsx initializes security settings (including NoDefaultCurrentDi- rectoryInExePath to prevent Windows PATH hijacking), registers signal handlers for graceful shutdown, and dispatches to the appropriate execution mode.
+6. **State & persistence**: Mostly append-only JSONL session transcripts (sessionStorage.ts), global prompt history (history.ts), and subagent sidechain files.
 
-Surface Layer Core Layer Safety / Action Layer Backend Layer Extensibility (plugins & skills) approval dialog Execution Interactive submit/ interupt Backends CLI tool request shell commands UI/ Render Agent Loop Permission IDE/Desktop local/ cloud/ remote output/ progress System
+7. **Execution environment**: Shell execution with optional sandboxing (shouldUseSandbox.ts), filesystem operations, web fetching, MCP server connections, and remote execution.
 
-- auto classifier Shell sandbox Y/N /Browser Built-in Tools pre-model compacted context tool surface lifecycle modify decision shapers Y/N External Resources headless sandboxed events Headless CLI MCP Tools request execution Hook Pipeline programmatic Agent SDK Subagent spawning Y/N Compaction query Pipeline summary only return
+The data flow follows a left-to-right spine: the user submits a request through an interface, which enters the agent loop. The loop proposes actions to the permission system; approved actions reach tools, which interact with the execution environment and return `tool_result` messages back to the loop. State and persistence sit alongside the loop, recording transcripts and loading prior session data.
 
-system prompt mutate transcript Resume/fork subagent transcript state State Layer Context Assembly Runtime Session Persistence CLAUDE.md Sidechain Transcriptions State
+The application entry point `main()` in `main.tsx` initializes security settings (including NoDefaultCurrentDirectoryInExePath to prevent Windows PATH hijacking), registers signal handlers for graceful shutdown, and dispatches to the appropriate execution mode.
 
-- memory
-
-![Figure 3 Expanded layered architecture showing five subsystem layers: surface (Interactive CLI, Headless CLI, Agent SDK, IDE/Desktop/Browser, UI/renderer), core (agent loop, compaction pipeline), safety/action (permission system incl. auto-mode classifier, hook pipeline, extensibility, built-in tools, MCP tools, shell sandbox, subagent spawning), state (context assembly, runtime state, session persistence, CLAUDE.md + memory, sidechain transcripts), and backend (execution backends, external resources).](../assets/layered_architecture.png)
+![Figure 3 Expanded layered architecture showing five subsystem layers: surface (Interactive CLI, Headless CLI, Agent SDK, IDE/Desktop/Browser, UI/renderer), core (agent loop, compaction pipeline), safety/action (permission system incl. auto-mode classifier, hook pipeline, extensibility, built-in tools, MCP tools, shell sandbox, subagent spawning), state (context assembly, runtime state, session persistence, CLAUDE.md + memory, sidechain transcripts), and backend (execution backends, external resources).](Dive_into_Claude_Code_assets/figure-03.png)
 
 Figure 3 Expanded layered architecture showing five subsystem layers: surface (Interactive CLI, Headless CLI, Agent SDK, IDE/Desktop/Browser, UI/renderer), core (agent loop, compaction pipeline), safety/action (permission system incl. auto-mode classifier, hook pipeline, extensibility, built-in tools, MCP tools, shell sandbox, subagent spawning), state (context assembly, runtime state, session persistence, CLAUDE.md + memory, sidechain transcripts), and backend (execution backends, external resources).
 
-3.3 Layered Subsystem Decomposition The five-layer decomposition (Figure 3) expands the seven-component model into a finer-grained view, mapping each layer to specific source directories.
+#### 3.3 Layered Subsystem Decomposition
 
-Surface layer (entry points and rendering). The src/entrypoints/ directory contains startup paths, including the SDK entry with coreTypes.ts, controlSchemas.ts, and coreSchemas.ts. The src/screens/ directory composes full-screen layouts, and src/components/ provides terminal UI building blocks via the ink framework. The interactive CLI launches a terminal UI with real-time streaming, permission dialogs, and progress indicators. The headless CLI (claude -p) creates a QueryEngine instance for single-shot processing. The Agent SDK emits typed events via async generators.
+The five-layer decomposition (Figure 3) expands the seven-component model into a finer-grained view, mapping each layer to specific source directories.
 
-Core layer (agent loop, compaction pipeline). The queryLoop() async generator (query.ts) implements the iterative agent loop, consuming assembled context from the state layer and dispatching tool requests to the safety/action layer. Before every model call, a compaction pipeline of five sequential shapers (query.ts:365–
+`Surface layer (entry points and rendering)`. The `src/entrypoints/` directory contains startup paths, including the SDK entry with coreTypes.ts, controlSchemas.ts, and coreSchemas.ts. The src/screens/ directory composes full-screen layouts, and src/components/ provides terminal UI building blocks via the ink framework. The interactive CLI launches a terminal UI with real-time streaming, permission dialogs, and progress indicators. The headless CLI (claude -p) creates a QueryEngine instance for single-shot processing. The Agent SDK emits typed events via async generators.
 
-453. manages context pressure: budget reduction, snip, microcompact, context collapse, and auto-compact (Sections 4.3 and 7.3).
+`Core layer (agent loop, compaction pipeline)`. The queryLoop() async generator (query.ts) implements the iterative agent loop, consuming assembled context from the state layer and dispatching tool requests to the safety/action layer. Before every model call, a compaction pipeline of five sequential shapers (query.ts:365–453) manages context pressure: budget reduction, snip, microcompact, context collapse, and auto-compact (Sections 4.3 and 7.3).
 
-Safety/action layer (permission system, hooks, extensibility, tools, sandbox, subagents). The permission system (permissions.ts) implements deny-first rule evaluation with up to seven permission modes (if also counting internal-only bubble and feature-gated auto) (types/permissions.ts) and an integrated auto-mode ML classifier (yoloClassifier.ts) that provides a two-stage fast-filter and chain-of-thought evaluation of tool safety (Section 5). A hook pipeline spanning 27 event types (coreTypes.ts; output schemas in types/hooks.ts) can block, rewrite, or annotate tool requests; of these, 5 are safety-related while the remaining 22 serve lifecycle and orchestration purposes (Section 6). An extensibility subsystem allows plugins and skills to register tools and hooks into the runtime. Tool pool assembly via assembleToolPool() (tools.ts) merges built-in and MCP-provided tools. Approved shell commands pass through a shell sandbox (shouldUseSandbox.ts) that restricts filesystem and network access independently of the permission system. Subagent spawning via AgentTool (AgentTool.tsx, runAgent.ts) is dispatched through the same buildTool() factory as all other tools, re-entering the queryLoop() with an isolated context window and returning only a summary to the parent (Section 8).
+`Safety/action layer (permission system, hooks, extensibility, tools, sandbox, subagents)`. The permission system (permissions.ts) implements deny-first rule evaluation with up to seven permission modes (if also counting internal-only bubble and feature-gated auto) (types/permissions.ts) and an integrated auto-mode ML classifier (yoloClassifier.ts) that provides a two-stage fast-filter and chain-of-thought evaluation of tool safety (Section 5). A hook pipeline spanning 27 event types (coreTypes.ts; output schemas in types/hooks.ts) can block, rewrite, or annotate tool requests; of these, 5 are safety-related while the remaining 22 serve lifecycle and orchestration purposes (Section 6). An extensibility subsystem allows plugins and skills to register tools and hooks into the runtime. Tool pool assembly via assembleToolPool() (tools.ts) merges built-in and MCP-provided tools. Approved shell commands pass through a shell sandbox (shouldUseSandbox.ts) that restricts filesystem and network access independently of the permission system. Subagent spawning via AgentTool (AgentTool.tsx, runAgent.ts) is dispatched through the same buildTool() factory as all other tools, re-entering the queryLoop() with an isolated context window and returning only a summary to the parent (Section 8).
 
-State layer (context assembly, runtime state, persistence, memory, sidechains). Context assembly is a memoized state loader, not a routing hub: getSystemContext() (context.ts) computes session-level system context including git status, and getUserContext() (context.ts) loads the CLAUDE.md hierarchy and current date. Both are cached for reuse: system context is appended to the system prompt, while user context is added as a user-context message. The src/state/ directory manages runtime application state. Session transcripts are stored as mostly append-only JSONL files at project-specific paths (sessionStorage.ts). The CLAUDE.md + memory subsystem provides a four-level instruction hierarchy (claudemd.ts) from managed settings to directory-specific files, plus auto-memory entries that Claude writes during conversations (Section 7.2). Sidechain transcripts (sessionStorage.ts:247) store each subagent’s conversation in a separate file, preventing subagent content from inflating the parent context (Section 8.3). Global prompt history is maintained in history.jsonl (history.ts). Resume and fork operations reconstruct session state from transcripts (conversationRecovery.ts).
+`State layer (context assembly, runtime state, persistence, memory, sidechains)`. Context assembly is a memoized state loader, not a routing hub: getSystemContext() (context.ts) computes session-level system context including git status, and getUserContext() (context.ts) loads the CLAUDE.md hierarchy and current date. Both are cached for reuse: system context is appended to the system prompt, while user context is added as a user-context message. The src/state/ directory manages runtime application state. Session transcripts are stored as mostly append-only JSONL files at project-specific paths (sessionStorage.ts). The CLAUDE.md + memory subsystem provides a four-level instruction hierarchy (claudemd.ts) from managed settings to directory-specific files, plus auto-memory entries that Claude writes during conversations (Section 7.2). Sidechain transcripts (sessionStorage.ts:247) store each subagent’s conversation in a separate file, preventing subagent content from inflating the parent context (Section 8.3). Global prompt history is maintained in history.jsonl (history.ts). Resume and fork operations reconstruct session state from transcripts (conversationRecovery.ts).
 
-Backend layer (execution backends, external resources). Shell command execution with optional sandboxing (BashTool.tsx, PowerShellTool.tsx), remote execution support (src/remote/), MCP server connections across multiple transport variants including stdio, SSE, HTTP, WebSocket, SDK, and IDE-specific adapters (services/mcp/client.ts), and 42 tool subdirectories in src/tools/ implement concrete tool logic.
+`Backend layer (execution backends, external resources)`. Shell command execution with optional sandboxing (BashTool.tsx, PowerShellTool.tsx), remote execution support (src/remote/), MCP server connections across multiple transport variants including stdio, SSE, HTTP, WebSocket, SDK, and IDE-specific adapters (services/mcp/client.ts), and 42 tool subdirectories in src/tools/ implement concrete tool logic.
 
-3.4 QueryEngine: A Clarification The class documentation at QueryEngine.ts states: “QueryEngine owns the query lifecycle and session state for a conversation. It extracts the core logic from ask() into a standalone class that can be used by both the headless/SDK path and (in a future phase) the REPL.” The class is a conversation wrapper for non-interactive surfaces, not the engine itself. Its constructor accepts a QueryEngineConfig with initial messages, an abort controller, a file-state cache, and other per-conversation state. Its submitMessage() method is an async generator that orchestrates a single turn. The shared query path lives in query() (query.ts), which wraps an internal queryLoop(); QueryEngine delegates to query(). This distinction matters architecturally: the interactive CLI also calls query(), bypassing QueryEngine entirely. The shared code path is the loop function, not the engine class.
+#### 3.4 QueryEngine: A Clarification
 
-3.5 Permission and Safety Layers The safety-by-default principle is implemented through seven independent layers. A request must pass through all applicable layers, and any single layer can block it:
+The class documentation at QueryEngine.ts states: “QueryEngine owns the query lifecycle and session state for a conversation. It extracts the core logic from ask() into a standalone class that can be used by both the headless/SDK path and (in a future phase) the REPL.” The class is a conversation wrapper for non-interactive surfaces, not the engine itself. Its constructor accepts a QueryEngineConfig with initial messages, an abort controller, a file-state cache, and other per-conversation state. Its submitMessage() method is an async generator that orchestrates a single turn. The shared query path lives in query() (query.ts), which wraps an internal queryLoop(); QueryEngine delegates to query(). This distinction matters architecturally: the interactive CLI also calls query(), bypassing QueryEngine entirely. The shared code path is the loop function, not the engine class.
 
-1. Tool pre-filtering (tools.ts): Blanket-denied tools are removed from the model’s view before any call, preventing the model from attempting to invoke them.
+#### 3.5 Permission and Safety Layers 
 
-2. Deny-first rule evaluation (permissions.ts): Deny rules always take precedence over allow rules, even when the allow rule is more specific.
+The safety-by-default principle is implemented through seven independent layers. A request must pass through all applicable layers, and any single layer can block it:
 
-3. Permission mode constraints (types/permissions.ts): The active mode determines baseline handling for requests matching no explicit rule.
+1. **Tool pre-filtering (tools.ts)**: Blanket-denied tools are removed from the model’s view before any call, preventing the model from attempting to invoke them.
 
-4. Auto-mode classifier: An ML-based classifier evaluates tool safety, potentially denying requests the rule system would allow.
+2. **Deny-first rule evaluation (permissions.ts)**: Deny rules always take precedence over allow rules, even when the allow rule is more specific.
 
-5. Shell sandboxing (shouldUseSandbox.ts): Approved shell commands may still execute inside a sandbox restricting filesystem and network access.
+3. **Permission mode constraints (types/permissions.ts)**: The active mode determines baseline handling for requests matching no explicit rule.
 
-6. Not restoring permissions on resume (conversationRecovery.ts): Session-scoped permissions are not restored on resume or fork.
+4. **Auto-mode classifier**: An ML-based classifier evaluates tool safety, potentially denying requests the rule system would allow.
 
-7. Hook-based interception (types/hooks.ts): PreToolUse hooks can modify permission decisions; Per- missionRequest hooks can resolve decisions asynchronously alongside the user dialog (or before it, in coordinator mode). These layers are described in detail in Section 5.
+5. **Shell sandboxing (shouldUseSandbox.ts)**: Approved shell commands may still execute inside a sandbox restricting filesystem and network access.
 
-3.6 Context as Bottleneck: Beyond Compaction Beyond the five-layer compaction pipeline (detailed in Section 7), several other subsystem decisions reflect the context-as-bottleneck constraint:
+6. **Not restoring permissions on resume** (conversationRecovery.ts): Session-scoped permissions are not restored on resume or fork.
 
-- CLAUDE.md lazy loading: The base CLAUDE.md hierarchy is loaded at session start, but additional nested-directory instruction files and conditional rules are loaded only when the agent reads files in those directories, preventing unused instructions from consuming context.
+7. **Hook-based interception (types/hooks.ts)**: PreToolUse hooks can modify permission decisions; Per- missionRequest hooks can resolve decisions asynchronously alongside the user dialog (or before it, in coordinator mode). These layers are described in detail in Section 5.
 
-- Deferred tool schemas: When ToolSearch is enabled, some tools include only their names in the initial context; full schemas are loaded on demand.
+#### 3.6 Context as Bottleneck: Beyond Compaction
 
-- Subagent summary-only return: Subagents return only summary text to the parent, not their full conversation history (Section 8).
+Beyond the five-layer compaction pipeline (detailed in Section 7), several other subsystem decisions reflect the context-as-bottleneck constraint:
 
-- Per-tool-result budget: Individual tool results are capped at a configurable size, preventing a single verbose output from consuming disproportionate context.
+- **CLAUDE.md lazy loading**: The base CLAUDE.md hierarchy is loaded at session start, but additional nested-directory instruction files and conditional rules are loaded only when the agent reads files in those directories, preventing unused instructions from consuming context.
+
+- **Deferred tool schemas**: When ToolSearch is enabled, some tools include only their names in the initial context; full schemas are loaded on demand.
+
+- **Subagent summary-only return**: Subagents return only summary text to the parent, not their full conversation history (Section 8).
+
+- **Per-tool-result budget**: Individual tool results are capped at a configurable size, preventing a single verbose output from consuming disproportionate context.
 
 ### 4 Turn Execution: The Agentic Query Loop
 
 When the user submits “Fix the failing test in auth.test.ts,” the input enters a reactive loop, one of several possible orchestration patterns for coding agents. This section examines Claude Code’s choice of a simple while-loop architecture and traces one turn of that loop end-to-end, illustrating three design principles from Table 1: minimal scaffolding with maximal operational harness, context as scarce resource with progressive management, and graceful recovery and resilience.
 
-4.1 The Query Pipeline Each turn follows a fixed sequence (Figure 2, query.ts):
+#### 4.1 The Query Pipeline
+
+Each turn follows a fixed sequence (Figure 2, query.ts):
 
 1. Settings resolution. The queryLoop() function destructures immutable parameters including the system prompt, user context, permission callback, and model configuration.
 
@@ -220,17 +212,29 @@ When the user submits “Fix the failing test in auth.test.ts,” the input ente
 
 8. Tool execution and result collection. Tool results are added to the conversation as tool_result messages, and the loop continues.
 
-9. Stop condition. If the response contains no tool_use blocks (text only), the turn is complete. The queryLoop() function is defined as an AsyncGenerator, yielding StreamEvent, RequestStartEvent, Message, TombstoneMessage, and ToolUseSummaryMessage events as it progresses. This generator-based design enables streaming output to the UI layer while maintaining a single synchronous control flow within the loop. Claude Code’s reactive loop follows the ReAct pattern (Yao et al., 2022): the model generates reasoning and tool invocations, the harness executes actions, and results feed the next iteration. Alternative orchestration patterns include explicit graph-based routing (LangChain, Inc., 2024), where control flow is defined as a state machine with typed edges, and tree-search methods (Zhou et al., 2023) that explore multiple action trajectories
+9. Stop condition. If the response contains no tool_use blocks (text only), the turn is complete. 
 
-before committing. Anthropic’s own documentation (Schluntz and Zhang, 2024) identifies five composable workflow patterns (prompt chaining, routing, parallelization, orchestrator-workers, and evaluator-optimizer) of which Claude Code primarily uses the orchestrator-workers pattern for subagent delegation (Section 8) while keeping the core loop reactive. The reactive design trades search completeness for simplicity and latency: each turn commits to one action sequence without backtracking.
+The queryLoop() function is defined as an AsyncGenerator, yielding StreamEvent, RequestStartEvent, Message, TombstoneMessage, and ToolUseSummaryMessage events as it progresses. This generator-based design enables streaming output to the UI layer while maintaining a single synchronous control flow within the loop. 
 
-4.2 Tool Dispatch and Streaming Execution When the model response contains tool_use blocks, the system chooses between two execution paths. The primary path uses StreamingToolExecutor, which begins executing tools as they stream in from the model response, reducing latency for multi-tool responses. The fallback path uses runTools() in toolOrchestration.ts, which iterates over partitions produced by partitionToolCalls(). Both paths classify tools as concurrent-safe or exclusive. Read-only operations can execute in parallel, while state-modifying operations like shell commands are serialized. The StreamingToolExecutor (StreamingToolExecutor.ts) manages concurrent execution with two coordination mechanisms:
+Claude Code’s reactive loop follows the ReAct pattern (Yao et al., 2022): the model generates reasoning and tool invocations, the harness executes actions, and results feed the next iteration. Alternative orchestration patterns include explicit graph-based routing (LangChain, Inc., 2024), where control flow is defined as a state machine with typed edges, and tree-search methods (Zhou et al., 2023) that explore multiple action trajectories before committing. Anthropic’s own documentation (Schluntz and Zhang, 2024) identifies five composable workflow patterns (prompt chaining, routing, parallelization, orchestrator-workers, and evaluator-optimizer) of which Claude Code primarily uses the orchestrator-workers pattern for subagent delegation (Section 8) while keeping the core loop reactive. The reactive design trades search completeness for simplicity and latency: each turn commits to one action sequence without backtracking.
+
+#### 4.2 Tool Dispatch and Streaming Execution
+
+When the model response contains tool_use blocks, the system chooses between two execution paths. The primary path uses StreamingToolExecutor, which begins executing tools as they stream in from the model response, reducing latency for multi-tool responses. The fallback path uses runTools() in toolOrchestration.ts, which iterates over partitions produced by partitionToolCalls(). Both paths classify tools as concurrent-safe or exclusive. Read-only operations can execute in parallel, while state-modifying operations like shell commands are serialized.
+
+The StreamingToolExecutor (StreamingToolExecutor.ts) manages concurrent execution with two coordination mechanisms:
 
 - Sibling abort controller. Fires when any Bash tool errors, immediately terminating other in-flight subprocesses rather than letting them run to completion.
 
-- Progress-available signal. Wakes up the getRemainingResults() consumer when new output is ready. Results are buffered and emitted in the order tools were received, so output order stays the same even when tools run in parallel. This is important because the model expects tool results in the same order as its tool-use requests. This concurrent-read, serial-write execution model occupies a middle ground between fully serial dispatch and more aggressive speculative approaches such as PASTE (Sui et al., 2026), which speculatively pre-executes predicted future tool calls while the model is still generating, hiding tool latency through speculation. The tool result collection phase iterates over updates from either the streaming executor or the synchronous runTools() generator. Each update may carry a tool result, an attachment, or a progress event. A special check detects hook_stopped_continuation attachments: if a PostToolUse hook signals that the turn should not continue, a shouldPreventContinuation flag is set. Results are normalized for the Anthropic API via normalizeMessagesForAPI(), filtering to keep only user-type messages.
+- Progress-available signal. Wakes up the getRemainingResults() consumer when new output is ready. 
 
-4.3 Pre-Model Context Shapers Five context shapers execute sequentially in query.ts before every model call, each operating on the messagesForQuery array. The five shapers run in sequence, with earlier steps applying lighter reductions before later steps apply broader compaction.
+Results are buffered and emitted in the order tools were received, so output order stays the same even when tools run in parallel. This is important because the model expects tool results in the same order as its tool-use requests. This concurrent-read, serial-write execution model occupies a middle ground between fully serial dispatch and more aggressive speculative approaches such as PASTE (Sui et al., 2026), which speculatively pre-executes predicted future tool calls while the model is still generating, hiding tool latency through speculation.
+
+The tool result collection phase iterates over updates from either the streaming executor or the synchronous runTools() generator. Each update may carry a tool result, an attachment, or a progress event. A special check detects hook_stopped_continuation attachments: if a PostToolUse hook signals that the turn should not continue, a shouldPreventContinuation flag is set. Results are normalized for the Anthropic API via normalizeMessagesForAPI(), filtering to keep only user-type messages.
+
+#### 4.3 Pre-Model Context Shapers
+
+Five context shapers execute sequentially in `query.ts` before every model call, each operating on the `messagesForQuery array`. The five shapers run in sequence, with earlier steps applying lighter reductions before later steps apply broader compaction.
 
 Budget reduction. (applyToolResultBudget()). Enforces per-message size limits on tool results, replacing oversized outputs with content references. Exempt tools (those where maxResultSizeChars is not finite) retain their full output. Content replacements are persisted for agent and session query sources to enable reconstruction on resume. Budget reduction runs before microcompact because microcompact operates purely by tool_use_id and never inspects content; the two compose cleanly.
 
@@ -272,7 +276,7 @@ Production coding agents adopt different safety architectures: layered policy en
 
 Principle Description Progressive Trust The agent starts with minimal autonomy; users expand it by approving tool invocations that become permanent rules. Policy Core Denied Result Deny Rules Permission Decision Deny-First, Ask-by-Default Deny rules always win, even under looser modes. If no rule matches, the gate asks the user instead of silently running or blocking. Execution Environment Tools Allow Tool Use Modes Allow/ Deny User/Auto Classifier Hooks Ask Composable Policy Three mechanisms shape policy: declarative rules, global trust modes, and programmable hooks, each independently configurable.
 
-![Figure 4 Permission gate overview and design principles.](../assets/permission.png)
+![Figure 4 Permission gate overview and design principles.](Dive_into_Claude_Code_assets/figure-04.png)
 
 Figure 4 Permission gate overview and design principles.
 
@@ -344,7 +348,7 @@ MCP servers. The Model Context Protocol is the primary external tool integration
 
 b model(): what the model can reach # one turn of Claude Code’s agent loop while not stopped: Element What it does # a assemble -- build what the model sees context = assemble( Built-in tools Read / Edit / Bash / . . . shipped with the CLI MCP tools Tools from any MCP server, in the same flat pool SkillTool Meta-tool that launches a skill by name AgentTool Meta-tool that spawns a sub-agent recursively system_prompt, # instructions header tool_schemas, # callable tool signatures history, # prior turn messages hook_additions, # pushed in by hooks ) # b model -- pick the next action action = model(context, tools) # flat tool pool if action.is_text_only(): stopped = run_stop_hooks(action) # may veto continue # c execute -- gate and run the tool call if not permitted(action): # permission continue action = run_pre_tool_hooks(action) # block/rewrite result = execute(action) # tool runs here result = run_post_tool_hooks(result) # mutate/annotate history.append(action, result) c execute(): whether / how an action runs Element What it does Permission rules Declarative allow / deny / ask per call PreToolUse hook Approve / block / rewrite a tool call PostToolUse hook Mutate output or inject context after a call Stop hook Force the loop to keep going at model stop SubagentStop hook Same, for sub-agents spawned via AgentTool Notification hook External side effects on user notifications a assemble(): what the model sees Element What it does CLAUDE.md files Loaded into context; files above the working directory load at startup, and subdirectory files load on demand Skill descriptions Advertises skills so the model calls SkillTool MCP resources & prompts Non-tool content an MCP server pushes Output style Replaces the responseformatting system block UserPromptSubmit hook Inject context, or block, on every user turn SessionStart hook One-shot context injection at session start
 
-![Figure 5 Where Claude Code’s extension mechanisms plug into the agent loop. The pseudocode on the left is a zoom-in of the Agent Loop block in Figure 1. Every agent loop has three injection points: a assemble() controls what the model sees, b model() controls what it can reach, and c execute() controls whether and how an action actually runs.](../assets/extensibility.png)
+![Figure 5 Where Claude Code’s extension mechanisms plug into the agent loop. The pseudocode on the left is a zoom-in of the Agent Loop block in Figure 1. Every agent loop has three injection points: a assemble() controls what the model sees, b model() controls what it can reach, and c execute() controls whether and how an action actually runs.](Dive_into_Claude_Code_assets/figure-05.png)
 
 Figure 5 Where Claude Code’s extension mechanisms plug into the agent loop. The pseudocode on the left is a zoom-in of the Agent Loop block in Figure 1. Every agent loop has three injection points: a assemble() controls what the model sees, b model() controls what it can reach, and c execute() controls whether and how an action actually runs.
 
@@ -414,7 +418,7 @@ Generate (3) Memory [startup] Sys-write Auto Memory Compact Summary (Replaces lo
 
 ACCESS Mutability increases Loaded Time: (1) (2) (3) at start up -> (4) accumulate per turn -> (5) added during execution -> (6) on demand via Tool Search
 
-![Figure 6 Context construction and memory hierarchy. Sources converging on the context window include system prompt, output styles, environment info, the CLAUDE.md hierarchy (managed through directory-specific), auto memory, path-scoped rules, MCP tool names, deferred tool definitions via ToolSearch, conversation history, file reads, command outputs, tool results, subagent summaries, and compact summaries.](../assets/context.png)
+![Figure 6 Context construction and memory hierarchy. Sources converging on the context window include system prompt, output styles, environment info, the CLAUDE.md hierarchy (managed through directory-specific), auto memory, path-scoped rules, MCP tool names, deferred tool definitions via ToolSearch, conversation history, file reads, command outputs, tool results, subagent summaries, and compact summaries.](Dive_into_Claude_Code_assets/figure-06.png)
 
 Figure 6 Context construction and memory hierarchy. Sources converging on the context window include system prompt, output styles, environment info, the CLAUDE.md hierarchy (managed through directory-specific), auto memory, path-scoped rules, MCP tool names, deferred tool definitions via ToolSearch, conversation history, file reads, command outputs, tool results, subagent summaries, and compact summaries.
 
@@ -454,7 +458,7 @@ Other Built-in Tools statusline, verification + Isolation Sandbox Context isolat
 
 Insert Result Main Transcript
 
-![Figure 7 Subagent isolation and delegation architecture. The Agent tool dispatches to built-in subagents (Explore, Plan, general-purpose) or custom subagents, each running in an isolated context with rebuilt permission context and independent tool sets. The Agent tool dispatches along three axes: routing (teammate), isolation (remote, worktree), and lifecycle (async, sync).](../assets/subagent.png)
+![Figure 7 Subagent isolation and delegation architecture. The Agent tool dispatches to built-in subagents (Explore, Plan, general-purpose) or custom subagents, each running in an isolated context with rebuilt permission context and independent tool sets. The Agent tool dispatches along three axes: routing (teammate), isolation (remote, worktree), and lifecycle (async, sync).](Dive_into_Claude_Code_assets/figure-07.png)
 
 Figure 7 Subagent isolation and delegation architecture. The Agent tool dispatches to built-in subagents (Explore, Plan, general-purpose) or custom subagents, each running in an isolated context with rebuilt permission context and independent tool sets. The Agent tool dispatches along three axes: routing (teammate), isolation (remote, worktree), and lifecycle (async, sync).
 
@@ -510,7 +514,7 @@ Session ID Conversation Context Window Principle Description Near Capacity Conve
 
 3. Mark Conversations Outgrow a Single Path A session should not be trapped on a single linear trajectory. The append-only transcript lets users rewind, resume, or fork into a new branch without losing prior work. Session Transcript Checkpoints Rewind .jsonl Resume History / Subagent Logs Fork
 
-![Figure 8 Session persistence and context compaction. The diagram separates live session state (context window, compaction) from durable storage (session transcripts, history.jsonl, subagent sidechains, checkpoints). Resume and fork restore messages but not session-scoped permissions.](../assets/session_compact.png)
+![Figure 8 Session persistence and context compaction. The diagram separates live session state (context window, compaction) from durable storage (session transcripts, history.jsonl, subagent sidechains, checkpoints). Resume and fork restore messages but not session-scoped permissions.](Dive_into_Claude_Code_assets/figure-08.png)
 
 Figure 8 Session persistence and context compaction. The diagram separates live session state (context window, compaction) from durable storage (session transcripts, history.jsonl, subagent sidechains, checkpoints). Resume and fork restore messages but not session-scoped permissions.
 
@@ -754,6 +758,6 @@ B.3 Limitations
 
 Source Structure (v2.1.88) Runtime Responsibility Entry & Startup main.tsx Application entry point, mode dispatch, signal handlers replLauncher.tsx Interactive REPL composition (components + screens) entrypoints/ SDK & headless startup (coreTypes.ts, coreSchemas.ts) cli/ CLI argument handlers (agents, auth, mcp, plugins) UI Layer components/, screens/ Terminal UI building blocks (ink framework), screen composition outputStyles/ System-prompt output style logic Core Loop query.ts Agentic query loop (queryLoop AsyncGenerator), 5 shapers query/ Loop config helpers (context assembly is in context.ts) QueryEngine.ts Headless/SDK conversation wrapper (delegates to query.ts) context.ts Context assembly (getSystemContext, getUserContext) Tools & Commands Tool.ts Tool interface and types (execution lives in services/tools/) tools/ 42 concrete tool implementations (Bash, Read, Edit, Agent, ...) services/tools/ Tool execution and orchestration (not registration) commands/ 86 slash command implementations Safety & Permissions utils/permissions/ Deny-first rule evaluation, yoloClassifier (auto-mode) types/permissions.ts 7 permission mode definitions (5 external + auto + bubble) hooks/useCanUseTool.tsx Permission handler (coordinator, swarm, classifier, interactive) components/permissions/ Permission dialog UI (PermissionDialog.tsx, per-tool prompts) Extensibility plugins/ Plugin loader, manifest validation, component registration skills/ Skill loader, SKILL.md frontmatter parsing, bundled skills utils/hooks.ts Hook registry, lifecycle dispatch across 27 event types types/hooks.ts + schemas/hooks.ts Hook schemas (Zod) + types (cmd/prompt/http/agent) Context & Memory services/compact/ 5-layer compaction (budget, snip, micro, collapse, auto) memdir/ Auto memory loading, entry cap enforcement utils/claudemd.ts CLAUDE.md 4-level hierarchy, @include processing state/ Runtime application state Persistence history.ts Global prompt history (history.jsonl, reverse-order reader) utils/sessionStorage.ts Per-session JSONL transcripts, sidechains, file-history Services & Integration services/ MCP client (8+ transports), API adapters, LSP, analytics remote/ Remote execution backend support coordinator/ Multi-agent coordination mode, worker management Additional Infrastructure bootstrap/, bridge/, constants/, server/ App init, WebSocket communication, API configuration ink/, keybindings/, vim/, buddy/, ... Terminal rendering, input handling, optional features
 
-![Figure 9 Extracted package structure mapped to runtime responsibilities. Left column: TypeScript source directories and key files. Right column: inferred runtime roles. This appendix represents reconstructed analysis (Tier C evidence), not official Anthropic documentation.](../assets/package_structure.png)
+![Figure 9 Extracted package structure mapped to runtime responsibilities. Left column: TypeScript source directories and key files. Right column: inferred runtime roles. This appendix represents reconstructed analysis (Tier C evidence), not official Anthropic documentation.](Dive_into_Claude_Code_assets/figure-09.png)
 
 Figure 9 Extracted package structure mapped to runtime responsibilities. Left column: TypeScript source directories and key files. Right column: inferred runtime roles. This appendix represents reconstructed analysis (Tier C evidence), not official Anthropic documentation.

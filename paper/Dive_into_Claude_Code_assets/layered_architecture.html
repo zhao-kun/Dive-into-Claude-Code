@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Code — Layered Subsystem Decomposition (§3.3)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #faf7f2;
+      --color-paper-2: #f2ede4;
+      --color-ink:     #1c1917;
+      --color-muted:   #57534e;
+      --color-soft:    #78716c;
+      --color-accent:  #b5523a;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 1.5rem;
+    }
+
+    .frame { max-width: 1280px; width: 100%; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      font-family: var(--font-sans);
+      font-size: 0.92rem;
+      color: var(--color-muted);
+      margin-bottom: 1.5rem;
+      max-width: 860px;
+    }
+
+    svg { width: 100%; min-width: 1080px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · Dive into Claude Code · §3.3</p>
+    <h1>Five layers, mapped to source</h1>
+    <p class="subtitle">Each layer owns a distinct responsibility and maps to specific directories. The <span style="font-family: var(--font-mono); font-size:0.88em;">queryLoop()</span> in the Core layer consumes assembled context from State and dispatches tool requests to Safety / Action.</p>
+
+    <svg viewBox="0 0 1200 780" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+          <circle cx="1" cy="1" r="0.9" fill="rgba(28,25,23,0.10)"/>
+        </pattern>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#57534e"/>
+        </marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#b5523a"/>
+        </marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#faf7f2"/>
+      <rect width="100%" height="100%" fill="url(#dots)" opacity="0.5"/>
+
+      <!-- ===================== LAYER STACK ===================== -->
+      <!-- Alternating band fills: L1,L3,L5 paper-2; L2,L4 paper (transparent) -->
+
+      <!-- L1 SURFACE band -->
+      <rect x="40" y="72" width="1120" height="120" fill="#f2ede4"/>
+      <!-- L2 CORE band -->
+      <rect x="40" y="192" width="1120" height="120" fill="rgba(181,82,58,0.03)"/>
+      <!-- L3 SAFETY band -->
+      <rect x="40" y="312" width="1120" height="120" fill="#f2ede4"/>
+      <!-- L4 BACKEND band -->
+      <rect x="40" y="432" width="1120" height="120" fill="#faf7f2"/>
+      <!-- L5 STATE band -->
+      <rect x="40" y="552" width="1120" height="120" fill="#f2ede4"/>
+
+      <!-- Outer stack border -->
+      <rect x="40" y="72" width="1120" height="600" rx="8" fill="none" stroke="rgba(28,25,23,0.20)" stroke-width="1"/>
+
+      <!-- Internal dividers -->
+      <line x1="40" y1="192" x2="1160" y2="192" stroke="rgba(28,25,23,0.12)" stroke-width="0.8"/>
+      <line x1="40" y1="312" x2="1160" y2="312" stroke="rgba(28,25,23,0.12)" stroke-width="0.8"/>
+      <line x1="40" y1="432" x2="1160" y2="432" stroke="rgba(28,25,23,0.12)" stroke-width="0.8"/>
+      <line x1="40" y1="552" x2="1160" y2="552" stroke="rgba(28,25,23,0.12)" stroke-width="0.8"/>
+
+      <!-- Vertical rail separating layer-header from tiles -->
+      <line x1="196" y1="72" x2="196" y2="672" stroke="rgba(28,25,23,0.12)" stroke-width="0.8"/>
+
+      <!-- ===================== LAYER HEADERS ===================== -->
+
+      <!-- L1 SURFACE header -->
+      <text x="60" y="112" fill="#57534e" font-size="10" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.16em">L1</text>
+      <text x="60" y="140" fill="#1c1917" font-size="15" font-weight="600" font-family="'Geist', sans-serif">Surface</text>
+      <text x="60" y="158" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace">src/entrypoints/</text>
+      <text x="60" y="172" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace">src/screens/</text>
+
+      <!-- L2 CORE header -->
+      <text x="60" y="232" fill="#b5523a" font-size="10" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.16em">L2</text>
+      <text x="60" y="260" fill="#1c1917" font-size="15" font-weight="600" font-family="'Geist', sans-serif">Core</text>
+      <text x="60" y="278" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace">query.ts</text>
+      <text x="60" y="292" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace">agent loop</text>
+
+      <!-- L3 SAFETY / ACTION header -->
+      <text x="60" y="352" fill="#57534e" font-size="10" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.16em">L3</text>
+      <text x="60" y="380" fill="#1c1917" font-size="15" font-weight="600" font-family="'Geist', sans-serif">Safety /</text>
+      <text x="60" y="398" fill="#1c1917" font-size="15" font-weight="600" font-family="'Geist', sans-serif">Action</text>
+      <text x="60" y="416" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace">gate · tools</text>
+
+      <!-- L4 BACKEND header -->
+      <text x="60" y="472" fill="#57534e" font-size="10" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.16em">L4</text>
+      <text x="60" y="500" fill="#1c1917" font-size="15" font-weight="600" font-family="'Geist', sans-serif">Backend</text>
+      <text x="60" y="518" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace">src/tools/</text>
+      <text x="60" y="532" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace">src/remote/</text>
+
+      <!-- L5 STATE header -->
+      <text x="60" y="592" fill="#57534e" font-size="10" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.16em">L5</text>
+      <text x="60" y="620" fill="#1c1917" font-size="15" font-weight="600" font-family="'Geist', sans-serif">State</text>
+      <text x="60" y="638" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace">src/state/</text>
+      <text x="60" y="652" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace">shared substrate</text>
+
+      <!-- ===================== L1 SURFACE TILES ===================== -->
+
+      <!-- Interactive CLI -->
+      <rect x="200" y="96" width="176" height="72" rx="6" fill="rgba(87,83,78,0.10)" stroke="#78716c" stroke-width="1"/>
+      <text x="288" y="130" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Interactive CLI</text>
+      <text x="288" y="148" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">ink REPL · TTY</text>
+
+      <!-- Headless CLI -->
+      <rect x="396" y="96" width="176" height="72" rx="6" fill="rgba(87,83,78,0.10)" stroke="#78716c" stroke-width="1"/>
+      <text x="484" y="130" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Headless CLI</text>
+      <text x="484" y="148" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">claude -p · QueryEngine</text>
+
+      <!-- Agent SDK -->
+      <rect x="592" y="96" width="176" height="72" rx="6" fill="rgba(87,83,78,0.10)" stroke="#78716c" stroke-width="1"/>
+      <text x="680" y="130" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Agent SDK</text>
+      <text x="680" y="148" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">sdk/* · async generators</text>
+
+      <!-- IDE / Desktop / Browser -->
+      <rect x="788" y="96" width="176" height="72" rx="6" fill="rgba(87,83,78,0.10)" stroke="#78716c" stroke-width="1"/>
+      <text x="876" y="130" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">IDE / Desktop</text>
+      <text x="876" y="148" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">browser · external client</text>
+
+      <!-- UI Renderer -->
+      <rect x="984" y="96" width="176" height="72" rx="6" fill="rgba(87,83,78,0.10)" stroke="#78716c" stroke-width="1"/>
+      <text x="1072" y="130" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">UI Renderer</text>
+      <text x="1072" y="148" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">components/ · ink</text>
+
+      <!-- ===================== L2 CORE TILES ===================== -->
+
+      <!-- queryLoop() FOCAL -->
+      <rect x="200" y="216" width="456" height="72" rx="6" fill="rgba(181,82,58,0.08)" stroke="#b5523a" stroke-width="1.2"/>
+      <rect x="208" y="224" width="32" height="12" rx="2" fill="transparent" stroke="rgba(181,82,58,0.50)" stroke-width="0.8"/>
+      <text x="224" y="233" fill="#b5523a" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ORIG</text>
+      <text x="428" y="254" fill="#1c1917" font-size="14" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">queryLoop()</text>
+      <text x="428" y="272" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">query.ts · async generator · ReAct reactive loop</text>
+
+      <!-- Compaction Pipeline -->
+      <rect x="700" y="216" width="460" height="72" rx="6" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <text x="930" y="254" fill="#1c1917" font-size="14" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Compaction Pipeline</text>
+      <text x="930" y="272" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">5 shapers · query.ts:365–453 · budget · snip · micro · collapse · auto</text>
+
+      <!-- Arrows between queryLoop and Compaction -->
+      <line x1="656" y1="244" x2="700" y2="244" stroke="#b5523a" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+      <line x1="700" y1="264" x2="656" y2="264" stroke="#57534e" stroke-width="1" marker-end="url(#arrow)"/>
+
+      <rect x="656" y="234" width="44" height="12" rx="2" fill="rgba(181,82,58,0.03)"/>
+      <text x="678" y="243" fill="#b5523a" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SHAPE</text>
+
+      <rect x="656" y="254" width="44" height="12" rx="2" fill="rgba(181,82,58,0.03)"/>
+      <text x="678" y="263" fill="#57534e" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CTX</text>
+
+      <!-- ===================== L3 SAFETY TILES ===================== -->
+
+      <!-- Permission Gate (security style) -->
+      <rect x="200" y="336" width="176" height="72" rx="6" fill="rgba(181,82,58,0.05)" stroke="rgba(181,82,58,0.55)" stroke-width="1.2" stroke-dasharray="4,4"/>
+      <rect x="208" y="344" width="32" height="12" rx="2" fill="transparent" stroke="rgba(181,82,58,0.50)" stroke-width="0.8"/>
+      <text x="224" y="353" fill="#b5523a" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">GATE</text>
+      <text x="288" y="374" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Permission Gate</text>
+      <text x="288" y="388" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">permissions.ts</text>
+      <text x="288" y="400" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">7 modes · deny-first</text>
+
+      <!-- Auto Classifier -->
+      <rect x="396" y="336" width="176" height="72" rx="6" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <text x="484" y="374" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Auto Classifier</text>
+      <text x="484" y="388" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">yoloClassifier.ts</text>
+      <text x="484" y="400" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">fast-filter + CoT</text>
+
+      <!-- Hook Pipeline -->
+      <rect x="592" y="336" width="176" height="72" rx="6" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <text x="680" y="374" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Hook Pipeline</text>
+      <text x="680" y="388" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">types/hooks.ts</text>
+      <text x="680" y="400" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">27 events · 5 safety</text>
+
+      <!-- Tool Pool -->
+      <rect x="788" y="336" width="176" height="72" rx="6" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <text x="876" y="374" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Tool Pool</text>
+      <text x="876" y="388" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">tools.ts</text>
+      <text x="876" y="400" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">built-in + MCP + plugins</text>
+
+      <!-- Subagent Dispatch -->
+      <rect x="984" y="336" width="176" height="72" rx="6" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <text x="1072" y="374" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Subagent Dispatch</text>
+      <text x="1072" y="388" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">AgentTool · runAgent.ts</text>
+      <text x="1072" y="400" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">re-enters queryLoop</text>
+
+      <!-- ===================== L4 BACKEND TILES ===================== -->
+
+      <!-- Built-in Tools -->
+      <rect x="200" y="456" width="176" height="72" rx="6" fill="rgba(28,25,23,0.03)" stroke="rgba(28,25,23,0.30)" stroke-width="1"/>
+      <text x="288" y="490" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Built-in Tools</text>
+      <text x="288" y="508" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">src/tools/ · 42 dirs</text>
+
+      <!-- Shell Sandbox -->
+      <rect x="396" y="456" width="176" height="72" rx="6" fill="rgba(28,25,23,0.03)" stroke="rgba(28,25,23,0.30)" stroke-width="1"/>
+      <text x="484" y="484" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Shell Sandbox</text>
+      <text x="484" y="500" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">shouldUseSandbox.ts</text>
+      <text x="484" y="514" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">fs + net restricted</text>
+
+      <!-- Shell Execution -->
+      <rect x="592" y="456" width="176" height="72" rx="6" fill="rgba(28,25,23,0.03)" stroke="rgba(28,25,23,0.30)" stroke-width="1"/>
+      <text x="680" y="484" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Shell Execution</text>
+      <text x="680" y="500" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">BashTool · PowerShell</text>
+      <text x="680" y="514" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">subprocess runners</text>
+
+      <!-- MCP Transports -->
+      <rect x="788" y="456" width="176" height="72" rx="6" fill="rgba(28,25,23,0.03)" stroke="rgba(28,25,23,0.30)" stroke-width="1"/>
+      <text x="876" y="484" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">MCP Transports</text>
+      <text x="876" y="500" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">services/mcp/client.ts</text>
+      <text x="876" y="514" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">stdio · SSE · HTTP · WS</text>
+
+      <!-- Remote / External -->
+      <rect x="984" y="456" width="176" height="72" rx="6" fill="rgba(28,25,23,0.03)" stroke="rgba(28,25,23,0.30)" stroke-width="1"/>
+      <text x="1072" y="484" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Remote / External</text>
+      <text x="1072" y="500" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">src/remote/</text>
+      <text x="1072" y="514" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">fs · net · APIs</text>
+
+      <!-- ===================== L5 STATE TILES ===================== -->
+
+      <!-- Context Assembly -->
+      <rect x="200" y="576" width="176" height="72" rx="6" fill="rgba(28,25,23,0.05)" stroke="#57534e" stroke-width="1"/>
+      <text x="288" y="604" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Context Assembly</text>
+      <text x="288" y="620" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">context.ts</text>
+      <text x="288" y="634" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">memoized loader</text>
+
+      <!-- Runtime State -->
+      <rect x="396" y="576" width="176" height="72" rx="6" fill="rgba(28,25,23,0.05)" stroke="#57534e" stroke-width="1"/>
+      <text x="484" y="604" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Runtime State</text>
+      <text x="484" y="620" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">src/state/</text>
+      <text x="484" y="634" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">State object · counters</text>
+
+      <!-- Session Persistence -->
+      <rect x="592" y="576" width="176" height="72" rx="6" fill="rgba(28,25,23,0.05)" stroke="#57534e" stroke-width="1"/>
+      <text x="680" y="604" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Session Persistence</text>
+      <text x="680" y="620" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">sessionStorage.ts</text>
+      <text x="680" y="634" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">JSONL · resume · fork</text>
+
+      <!-- CLAUDE.md + Memory -->
+      <rect x="788" y="576" width="176" height="72" rx="6" fill="rgba(28,25,23,0.05)" stroke="#57534e" stroke-width="1"/>
+      <text x="876" y="604" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">CLAUDE.md + Memory</text>
+      <text x="876" y="620" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">claudemd.ts</text>
+      <text x="876" y="634" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">4-level hierarchy</text>
+
+      <!-- Sidechain Transcripts -->
+      <rect x="984" y="576" width="176" height="72" rx="6" fill="rgba(28,25,23,0.05)" stroke="#57534e" stroke-width="1"/>
+      <text x="1072" y="604" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Sidechain Transcripts</text>
+      <text x="1072" y="620" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">sessionStorage.ts:247</text>
+      <text x="1072" y="634" fill="#78716c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">subagent isolation</text>
+
+      <!-- ===================== LEGEND ===================== -->
+      <line x1="40" y1="704" x2="1160" y2="704" stroke="rgba(28,25,23,0.12)" stroke-width="0.8"/>
+      <text x="40" y="722" fill="#57534e" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND · ONE COMPONENT = ONE SOURCE PATH</text>
+
+      <rect x="40" y="740" width="16" height="10" rx="2" fill="rgba(181,82,58,0.08)" stroke="#b5523a" stroke-width="1"/>
+      <text x="62" y="748" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Focal · the pivot</text>
+
+      <rect x="180" y="740" width="16" height="10" rx="2" fill="rgba(181,82,58,0.05)" stroke="rgba(181,82,58,0.55)" stroke-width="1" stroke-dasharray="3,3"/>
+      <text x="202" y="748" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Security gate</text>
+
+      <rect x="308" y="740" width="16" height="10" rx="2" fill="rgba(87,83,78,0.10)" stroke="#78716c" stroke-width="1"/>
+      <text x="330" y="748" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Surface / entry</text>
+
+      <rect x="440" y="740" width="16" height="10" rx="2" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <text x="462" y="748" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Process / module</text>
+
+      <rect x="580" y="740" width="16" height="10" rx="2" fill="rgba(28,25,23,0.03)" stroke="rgba(28,25,23,0.30)" stroke-width="1"/>
+      <text x="602" y="748" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">External / backend</text>
+
+      <rect x="724" y="740" width="16" height="10" rx="2" fill="rgba(28,25,23,0.05)" stroke="#57534e" stroke-width="1"/>
+      <text x="746" y="748" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">State / store</text>
+
+      <line x1="860" y1="746" x2="888" y2="746" stroke="#b5523a" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+      <text x="896" y="748" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Shape context</text>
+
+      <line x1="1000" y1="746" x2="1028" y2="746" stroke="#57534e" stroke-width="1" marker-end="url(#arrow)"/>
+      <text x="1036" y="748" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Return compacted</text>
+    </svg>
+  </div>
+</body>
+</html>
