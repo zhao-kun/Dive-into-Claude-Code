@@ -373,7 +373,7 @@ Both REPL.tsx (via the useMergedTools hook) and AgentTool.tsx (when building the
 
 Given that each additional extension mechanism increases the surface area developers must learn, a natural question is why Claude Code uses four distinct mechanisms rather than consolidating into one or two. The answer lies in the observation that different kinds of extensibility impose different costs on the context window, and a single mechanism cannot span the full range from zero-context lifecycle hooks to schema-heavy tool servers without forcing unnecessary trade-offs on extension authors.
 
-As Table 2 summarizes, each mechanism trades deployment complexity for a different kind of extensibility. MCP servers provide runtime tool integration (the model gains new callable tools) at the cost of server management overhead and context budget consumed by tool schemas. Skills shape how the agent thinks (not just what tools it has) at minimal context cost, since only frontmatter descriptions (not full content) stay in the prompt. Hooks provide cross-cutting lifecycle control (blocking, rewriting, or annotating tool calls) with no context footprint by default, though hooks can opt into injecting additional context. Plugins bundle any
+As Table 2 summarizes, each mechanism trades deployment complexity for a different kind of extensibility. MCP servers provide runtime tool integration (the model gains new callable tools) at the cost of server management overhead and context budget consumed by tool schemas. Skills shape how the agent thinks (not just what tools it has) at minimal context cost, since only frontmatter descriptions (not full content) stay in the prompt. Hooks provide cross-cutting lifecycle control (blocking, rewriting, or annotating tool calls) with no context footprint by default, though hooks can opt into injecting additional context. Plugins bundle any combination of the other three into distributable packages, acting as the packaging and distribution layer rather than a distinct runtime primitive. The graduated context-cost ordering (zero for hooks, low for skills, medium for plugins, high for MCP) means that cheap extensions can scale widely without exhausting the context window, while expensive ones are reserved for cases that genuinely require new tool surfaces.
 
 **Table 2** What each extension mechanism uniquely provides. Context cost refers to how much of the bounded context window the mechanism consumes when active.
 
@@ -384,93 +384,72 @@ As Table 2 summarizes, each mechanism trades deployment complexity for a differe
 |Skills |Domain-specific instructions + meta-tool invocation|Low (descriptions only) |assemble():context injection|
 | Hooks |Lifecycle interception + event-driven automation |Zero by default |execute():pre/post tool|
 
-combination of the other three into distributable packages, acting as the packaging and distribution layer rather than a distinct runtime primitive. The graduated context-cost ordering (zero for hooks, low for skills, medium for plugins, high for MCP) means that cheap extensions can scale widely without exhausting the context window, while expensive ones are reserved for cases that genuinely require new tool surfaces.
-
 Some agent frameworks provide a single extension mechanism, typically a tool-only API where all customization arrives as additional callable tools. Others use two tiers, separating tools from configuration or instruction injection. Claude Code’s four-mechanism approach can accommodate a broader range of extension patterns, from zero-context event handlers to full external service integrations, but it increases the learning curve developers face when deciding which mechanism to use for a given integration task.
 
 ### 7 Context Construction and Memory
 
 How an agent manages its context window and persists user instructions is a central design choice, with different systems choosing between file-based transparency, database-backed retrieval, and opaque learned representations. The design choices here implement two principles from Table 1: context as scarce resource with progressive management and transparent file-based configuration and memory. By this point in the running example, the task has accumulated state: the original request, the npm test permission outcome, the tool pool assembled in Section 6, and any file reads or command outputs gathered so far. This section asks how that growing state is packed into Claude Code’s bounded context window before the next model call. Before the model is called, the agent loop assembles a context window from the tool pool (Section 6), CLAUDE.md files, auto memory, and conversation history. The following subsections cover the assembly order, the CLAUDE.md hierarchy, and the multi-step compaction pipeline.
 
-7.1 Context Window Assembly The context window (Figure 6) is assembled from the following sources, some at initial assembly and others injected late during the turn:
+#### 7.1 Context Window Assembly
 
-1. System prompt, incorporating output style modifications and any --append-system-prompt flag content.
+The context window (Figure 6) is assembled from the following sources, some at initial assembly and others injected late during the turn:
 
-2. Environment info via getSystemContext() (context.ts): git status (skipped in remote mode or when git instructions are disabled) and an optional cache-breaking injection for internal builds (gated by BREAK_CACHE_COMMAND). Memoized once per session.
+1.**System prompt**, incorporating output style modifications and any --append-system-prompt flag content.
+2.**Environment info** via getSystemContext() (context.ts): git status (skipped in remote mode or when git instructions are disabled) and an optional cache-breaking injection for internal builds (gated by BREAK_CACHE_COMMAND). Memoized once per session.
+3.**CLAUDE.md hierarchy** via getUserContext() (context.ts): four-level instruction file hierarchy (Sec- tion 7.2). Also memoized.
+4.**Path-scoped rules**: conditional and directory-matched rules that load lazily when the agent reads files in matching directories.
+5.**Auto memory**: contextually relevant memory entries prefetched asynchronously.
+6.**Tool metadata**: skill descriptions, MCP tool names, and deferred tool definitions (via ToolSearch, on demand).
+7.**Conversation history**: carried forward, subject to compaction.
+8.**Tool results**: file reads, command outputs, subagent summaries.
+9.**Compact summaries**: replacing older history segments.
 
-3. CLAUDE.md hierarchy via getUserContext() (context.ts): four-level instruction file hierarchy (Sec- tion 7.2). Also memoized.
-
-4. Path-scoped rules: conditional and directory-matched rules that load lazily when the agent reads files in matching directories.
-
-5. Auto memory: contextually relevant memory entries prefetched asynchronously.
-
-6. Tool metadata: skill descriptions, MCP tool names, and deferred tool definitions (via ToolSearch, on demand).
-
-7. Conversation history: carried forward, subject to compaction.
-
-8. Tool results: file reads, command outputs, subagent summaries.
-
-9. Compact summaries: replacing older history segments.
-
-Context Window ACCESS (1) System Layer [startup] System Prompt Environment Info Output Styles Read-only Skill Description MCP Tool Names
-
-(2) Project Config [startup / lazy] Claude Model Reads all CLAUDE.md Hierarchy [5 levels] Path-scoped Rules (.claude/rules/*) Hot-reload Managed -> OS -> Project -> .claude/ -> local -> directory-specific | start up
-
-Generate (3) Memory [startup] Sys-write Auto Memory Compact Summary (Replaces long history)
-
-(4) Conversation [carry forward] Text Responce Append Conversation History Subagent Summaries
-
-(5) Runtime [carry forward] Tool Calls Model-trigger Read Files Command Outputs Tool Results
-
-(6) On-Demand [lazy] Tool Search Lazy-load Deferred Tool Definitions (Full schemas loaded only when needed)
-
-ACCESS Mutability increases Loaded Time: (1) (2) (3) at start up -> (4) accumulate per turn -> (5) added during execution -> (6) on demand via Tool Search
-
-![Figure 6 Context construction and memory hierarchy. Sources converging on the context window include system prompt, output styles, environment info, the CLAUDE.md hierarchy (managed through directory-specific), auto memory, path-scoped rules, MCP tool names, deferred tool definitions via ToolSearch, conversation history, file reads, command outputs, tool results, subagent summaries, and compact summaries.](Dive_into_Claude_Code_assets/figure-06.png)
+![Figure 6](Dive_into_Claude_Code_assets/figure-06.png)
 
 Figure 6 Context construction and memory hierarchy. Sources converging on the context window include system prompt, output styles, environment info, the CLAUDE.md hierarchy (managed through directory-specific), auto memory, path-scoped rules, MCP tool names, deferred tool definitions via ToolSearch, conversation history, file reads, command outputs, tool results, subagent summaries, and compact summaries.
 
-The system prompt assembly at query.ts combines system context with the base prompt via asSystem- Prompt(appendSystemContext(systemPrompt, systemContext))(). User context (CLAUDE.md and date) is prepended to the message array via prependUserContext(). This separation means CLAUDE.md content occupies a different structural position in the API request than the system prompt, potentially affecting model attention patterns. Several context sources are injected late, after the main window is constructed: relevant-memory prefetch (query.ts), MCP instructions deltas (only new or changed server instructions), agent listing deltas, and background agent task notifications. The context window is therefore not static at assembly time but can grow during the turn.
+The system prompt assembly at query.ts combines system context with the base prompt via asSystemPrompt(appendSystemContext(systemPrompt, systemContext))(). User context (CLAUDE.md and date) is prepended to the message array via prependUserContext(). This separation means CLAUDE.md content occupies a different structural position in the API request than the system prompt, potentially affecting model attention patterns.
 
-7.2 CLAUDE.md Hierarchy and Auto Memory A design principle shapes the memory system: stored context should be inspectable and editable by the user. CLAUDE.md files are plain-text Markdown rather than structured configuration or opaque database entries. This transparency choice trades expressiveness for auditability: users can read, edit, version-control, and delete any instruction the agent sees (MindStudio Team, 2026). Alternative memory architectures illustrate the trade-off. Retrieval-augmented approaches use embedding-based lookup to surface relevant prior context, gaining flexibility at the cost of inspectability: the user cannot easily see or edit what the retrieval system considers relevant. Database-backed memory offers structured querying but requires additional infrastructure and is opaque to version control. Claude Code’s file-based approach makes every instruction the agent sees directly readable, editable, and committable alongside the codebase. The system does not use embeddings or a vector similarity index for memory retrieval; instead it uses an LLM-based scan of memory-file headers to select up to five relevant files on demand, surfacing them at file granularity rather than entry granularity. Embedding-based systems can retrieve individual entries more selectively, at the cost of inspectability and the infrastructure needed to maintain an index.
+Several context sources are injected late, after the main window is constructed: relevant-memory prefetch (query.ts), MCP instructions deltas (only new or changed server instructions), agent listing deltas, and background agent task notifications. The context window is therefore not static at assembly time but can grow during the turn.
+
+#### 7.2 CLAUDE.md Hierarchy and Auto Memory
+
+A design principle shapes the memory system: stored context should be inspectable and editable by the user. CLAUDE.md files are plain-text Markdown rather than structured configuration or opaque database entries. This transparency choice trades expressiveness for auditability: users can read, edit, version-control, and delete any instruction the agent sees (MindStudio Team, 2026). Alternative memory architectures illustrate the trade-off. Retrieval-augmented approaches use embedding-based lookup to surface relevant prior context, gaining flexibility at the cost of inspectability: the user cannot easily see or edit what the retrieval system considers relevant. Database-backed memory offers structured querying but requires additional infrastructure and is opaque to version control. Claude Code’s file-based approach makes every instruction the agent sees directly readable, editable, and committable alongside the codebase. The system does not use embeddings or a vector similarity index for memory retrieval; instead it uses an LLM-based scan of memory-file headers to select up to five relevant files on demand, surfacing them at file granularity rather than entry granularity. Embedding-based systems can retrieve individual entries more selectively, at the cost of inspectability and the infrastructure needed to maintain an index.
 
 CLAUDE.md files follow a multi-level loading hierarchy. The source header (claudemd.ts) defines four memory types:
 
-1. Managed memory (e.g. /etc/claude-code/CLAUDE.md on Linux): OS-level policy for all users.
+1. **Managed memory** (e.g. /etc/claude-code/CLAUDE.md on Linux): OS-level policy for all users.
+2. **User memory (~/.claude/CLAUDE.md)**: private global instructions.
+3. **Project memory** (CLAUDE.md, .claude/CLAUDE.md, and .claude/rules/*.md in project roots): in- structions checked into the codebase.
+4. **Local memory** (CLAUDE.local.md in project roots): gitignored, for private project-specific instructions.
 
-2. User memory (~/.claude/CLAUDE.md): private global instructions.
+File discovery traverses from the current directory up to root, checking for all project and local memory files in each directory. Files closer to the current directory have higher priority (loaded later).
 
-3. Project memory (CLAUDE.md, .claude/CLAUDE.md, and .claude/rules/*.md in project roots): in- structions checked into the codebase.
+Files load in “reverse order of priority”: later-loaded files receive more model attention. For root-to-CWD directories, unconditional rules from .claude/rules/*.md load eagerly at startup. For nested directories below CWD, even unconditional rules are loaded lazily when the agent reads files in matching directories. This means the model’s instruction set can evolve during a conversation as new parts of the codebase are explored.
 
-4. Local memory (CLAUDE.local.md in project roots): gitignored, for private project-specific instructions. File discovery traverses from the current directory up to root, checking for all project and local memory files in each directory. Files closer to the current directory have higher priority (loaded later). Files load in “reverse order of priority”: later-loaded files receive more model attention. For root-to-CWD directories, unconditional rules from .claude/rules/*.md load eagerly at startup. For nested directories below CWD, even unconditional rules are loaded lazily when the agent reads files in matching directories. This means the model’s instruction set can evolve during a conversation as new parts of the codebase are explored. CLAUDE.md content is delivered as user context (a user message), not as system prompt content (context.ts). This architectural choice has a significant implication: because CLAUDE.md content is delivered as conversa- tional context rather than system-level instructions, model compliance with these instructions is probabilistic rather than guaranteed. Permission rules evaluated in deny-first order (Section 5) provide the deterministic enforcement layer. This creates a deliberate separation between guidance (CLAUDE.md, probabilistic) and enforcement (permission rules, deterministic). The function calls setCachedClaudeMdContent() to cache the loaded content for the auto-mode classifier, to avoid an import cycle between the CLAUDE.md loader and the permission system. Memory files support an @include directive for modular instruction sets (processMemoryFile() at claudemd.ts). Syntax variants include @path, @./relative, @~/home, and @/absolute. The directive works in leaf text nodes only (not inside code blocks). In the implementation, the including file is pushed first and included files are appended after it, circular references are prevented by tracking processed paths, and non-existent files are silently ignored.
+CLAUDE.md content is delivered as user context (a user message), not as system prompt content (context.ts). This architectural choice has a significant implication: because CLAUDE.md content is delivered as conversational context rather than system-level instructions, model compliance with these instructions is probabilistic rather than guaranteed. Permission rules evaluated in deny-first order (Section 5) provide the deterministic enforcement layer. This creates a deliberate separation between guidance (CLAUDE.md, probabilistic) and enforcement (permission rules, deterministic). The function calls setCachedClaudeMdContent() to cache the loaded content for the auto-mode classifier, to avoid an import cycle between the CLAUDE.md loader and the permission system.
 
-7.3 Compaction Pipeline The five-layer compaction pipeline (Section 4.3) implements the “context as bottleneck” principle through graduated compression (query.ts). Rather than a single strategy, Claude Code applies five layers in sequence, each with increasing aggressiveness (three are gated by feature flags; budget reduction is always active, while auto-compact is user-configurable). This graduated approach contrasts with simpler alternatives: many agent frameworks use single-pass truncation (dropping the oldest messages) or a single summarization step. The graduated design reflects a lazy-degradation principle: apply the least disruptive compression first, escalating only when cheaper strategies prove insufficient. The cost of this approach is complexity. Five interacting compression layers, several gated by feature flags, create behavior that is difficult for users to fully predict. Auto-compact produces a visible summary in the transcript, and microcompact emits a boundary marker, but context collapse operates without user-visible output. Simpler single-pass approaches sacrifice information but are easier to reason about.
+Memory files support an @include directive for modular instruction sets (processMemoryFile() at claudemd.ts). Syntax variants include @path, @./relative, @~/home, and @/absolute. The directive works in leaf text nodes only (not inside code blocks). In the implementation, the including file is pushed first and included files are appended after it, circular references are prevented by tracking processed paths, and non-existent files are silently ignored.
 
-1. Budget reduction (always active): per-tool-result size limits.
+#### 7.3 Compaction Pipeline
 
-2. Snip (HISTORY_SNIP): lightweight older-history trimming.
+The five-layer compaction pipeline (Section 4.3) implements the “context as bottleneck” principle through graduated compression (query.ts). Rather than a single strategy, Claude Code applies five layers in sequence, each with increasing aggressiveness (three are gated by feature flags; budget reduction is always active, while auto-compact is user-configurable). This graduated approach contrasts with simpler alternatives: many agent frameworks use single-pass truncation (dropping the oldest messages) or a single summarization step. The graduated design reflects a lazy-degradation principle: apply the least disruptive compression first, escalating only when cheaper strategies prove insufficient. The cost of this approach is complexity. Five interacting compression layers, several gated by feature flags, create behavior that is difficult for users to fully predict. Auto-compact produces a visible summary in the transcript, and microcompact emits a boundary marker, but context collapse operates without user-visible output. Simpler single-pass approaches sacrifice information but are easier to reason about.
 
-3. Microcompact (CACHED_MICROCOMPACT): fine-grained cache-aware compression.
+1. **Budget reduction** (always active): per-tool-result size limits.
+2. **Snip** (HISTORY_SNIP): lightweight older-history trimming.
+3. **Microcompact** (CACHED_MICROCOMPACT): fine-grained cache-aware compression.
+4. **Context collapse** (CONTEXT_COLLAPSE): read-time virtual projection over history.
+5. **Auto-compact** (enabled by default, can be disabled): full model-generated summary.
 
-4. Context collapse (CONTEXT_COLLAPSE): read-time virtual projection over history.
+The buildPostCompactMessages() function (compact.ts) returns the following compacted output structure: `[boundaryMarker, ...summaryMessages, ...messagesToKeep, ...attachments, ...hookResults]`. The boundary marker is annotated with preserved-segment metadata via annotateBoundaryWithPreservedSegment(), recording headUuid, anchorUuid, and tailUuid to enable read-time chain patching. This mostly-append design means compaction never modifies or deletes previously written transcript lines; it only appends new boundary and summary events.
 
-5. Auto-compact (enabled by default, can be disabled): full model-generated summary. The buildPostCompactMessages() function (compact.ts) returns the following compacted output structure: [boundaryMarker, ...summaryMessages, ...messagesToKeep, ...attachments, ...hookResults]. The bound- ary marker is annotated with preserved-segment metadata via annotateBoundaryWithPreservedSegment(), recording headUuid, anchorUuid, and tailUuid to enable read-time chain patching. This mostly-append design means compaction never modifies or deletes previously written transcript lines; it only appends new boundary and summary events.
-
-Other Built-in Tools statusline, verification + Isolation Sandbox Context isolated for each subagent Explore
-
-1. Rebuilt Permission
-
-2. Permission Mode
-
-3. Isolated Delegates Context & Tool Set Override (optional) Worktree Plan Agent Main Conversation Isolated Subagent Context General Task=legacy alias Read & Write Subagent Transcript Subagent Report .jsonl + meta.json text + metadata Custom
-
-Insert Result Main Transcript
-
-![Figure 7 Subagent isolation and delegation architecture. The Agent tool dispatches to built-in subagents (Explore, Plan, general-purpose) or custom subagents, each running in an isolated context with rebuilt permission context and independent tool sets. The Agent tool dispatches along three axes: routing (teammate), isolation (remote, worktree), and lifecycle (async, sync).](Dive_into_Claude_Code_assets/figure-07.png)
+![Figure 7](Dive_into_Claude_Code_assets/figure-07.png)
 
 Figure 7 Subagent isolation and delegation architecture. The Agent tool dispatches to built-in subagents (Explore, Plan, general-purpose) or custom subagents, each running in an isolated context with rebuilt permission context and independent tool sets. The Agent tool dispatches along three axes: routing (teammate), isolation (remote, worktree), and lifecycle (async, sync).
 
-The compaction function compactConversation() (compact.ts) includes several design choices. Pre-compact hooks fire first, allowing hook-injected custom instructions. A GrowthBook feature flag controls whether the compaction path reuses the main conversation’s prompt cache (a code comment documents a January 2026 experiment: “false path is 98% cache miss, costs ∼0.76% of fleet cache_creation”). After compaction, attachment builders re-announce runtime state (plans, skills, and async agents) from live app state, since compaction discards prior attachment messages but not the underlying state. Context isolation becomes more critical when the system delegates work to subagents, each operating in its own bounded context window.
+The compaction function compactConversation() (compact.ts) includes several design choices. Pre-compact hooks fire first, allowing hook-injected custom instructions. A GrowthBook feature flag controls whether the compaction path reuses the main conversation’s prompt cache (a code comment documents a January 2026 experiment: “false path is 98% cache miss, costs ∼0.76% of fleet cache_creation”). After compaction, attachment builders re-announce runtime state (plans, skills, and async agents) from live app state, since compaction discards prior attachment messages but not the underlying state.
+
+Context isolation becomes more critical when the system delegates work to subagents, each operating in its own bounded context window.
 
 ### 8 Subagent Delegation and Orchestration
 
