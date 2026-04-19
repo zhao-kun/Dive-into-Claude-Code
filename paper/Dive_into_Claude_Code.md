@@ -196,23 +196,15 @@ When the user submits “Fix the failing test in auth.test.ts,” the input ente
 
 Each turn follows a fixed sequence (Figure 2, query.ts):
 
-1. Settings resolution. The queryLoop() function destructures immutable parameters including the system prompt, user context, permission callback, and model configuration.
-
-2. Mutable state initialization. A single State object stores all mutable state across iterations, including messages, tool context, compaction tracking, and recovery counters. The loop’s seven continue points (the “continue sites”) each overwrite this object in one whole-object assignment rather than mutating fields individually.
-
-3. Context assembly. The function getMessagesAfterCompactBoundary() retrieves messages from the last compact boundary forward, ensuring that compacted content is represented by its summary rather than the original messages.
-
-4. Pre-model context shapers. Five shapers execute sequentially (Section 4.3).
-
-5. Model call. A for await loop over deps.callModel() streams the model’s response, passing assembled messages (with user context prepended), the full system prompt, thinking configuration, the available tool set, an abort signal, the current model specification, and additional options including fast-mode settings, effort value, and fallback model.
-
-6. Tool-use dispatch. If the response contains tool_use blocks, they flow to the tool orchestration layer (Section 4.2).
-
-7. Permission gate. Each tool request passes through the permission system (Section 5).
-
-8. Tool execution and result collection. Tool results are added to the conversation as tool_result messages, and the loop continues.
-
-9. Stop condition. If the response contains no tool_use blocks (text only), the turn is complete. 
+1. **Settings resolution**. The queryLoop() function destructures immutable parameters including the system prompt, user context, permission callback, and model configuration.
+2. **Mutable state initialization**. A single State object stores all mutable state across iterations, including messages, tool context, compaction tracking, and recovery counters. The loop’s seven continue points (the “continue sites”) each overwrite this object in one whole-object assignment rather than mutating fields individually.
+3. **Context assembly**. The function getMessagesAfterCompactBoundary() retrieves messages from the last compact boundary forward, ensuring that compacted content is represented by its summary rather than the original messages.
+4. **Pre-model context shapers**. Five shapers execute sequentially (Section 4.3).
+5. **Model call**. A for await loop over deps.callModel() streams the model’s response, passing assembled messages (with user context prepended), the full system prompt, thinking configuration, the available tool set, an abort signal, the current model specification, and additional options including fast-mode settings, effort value, and fallback model.
+6. **Tool-use dispatch**. If the response contains tool_use blocks, they flow to the tool orchestration layer (Section 4.2).
+7. **Permission gate**. Each tool request passes through the permission system (Section 5).
+8. **Tool execution and result collection**. Tool results are added to the conversation as tool_result messages, and the loop continues.
+9. **Stop condition**. If the response contains no tool_use blocks (text only), the turn is complete. 
 
 The queryLoop() function is defined as an AsyncGenerator, yielding StreamEvent, RequestStartEvent, Message, TombstoneMessage, and ToolUseSummaryMessage events as it progresses. This generator-based design enables streaming output to the UI layer while maintaining a single synchronous control flow within the loop. 
 
@@ -224,9 +216,9 @@ When the model response contains tool_use blocks, the system chooses between two
 
 The StreamingToolExecutor (StreamingToolExecutor.ts) manages concurrent execution with two coordination mechanisms:
 
-- Sibling abort controller. Fires when any Bash tool errors, immediately terminating other in-flight subprocesses rather than letting them run to completion.
+- **Sibling abort controller**. Fires when any Bash tool errors, immediately terminating other in-flight subprocesses rather than letting them run to completion.
 
-- Progress-available signal. Wakes up the getRemainingResults() consumer when new output is ready. 
+- **Progress-available signal**. Wakes up the getRemainingResults() consumer when new output is ready. 
 
 Results are buffered and emitted in the order tools were received, so output order stays the same even when tools run in parallel. This is important because the model expects tool results in the same order as its tool-use requests. This concurrent-read, serial-write execution model occupies a middle ground between fully serial dispatch and more aggressive speculative approaches such as PASTE (Sui et al., 2026), which speculatively pre-executes predicted future tool calls while the model is still generating, hiding tool latency through speculation.
 
@@ -234,151 +226,167 @@ The tool result collection phase iterates over updates from either the streaming
 
 #### 4.3 Pre-Model Context Shapers
 
-Five context shapers execute sequentially in `query.ts` before every model call, each operating on the `messagesForQuery array`. The five shapers run in sequence, with earlier steps applying lighter reductions before later steps apply broader compaction.
+`Five context` shapers execute sequentially in `query.ts` before every model call, each operating on the `messagesForQuery array`. The five shapers run in sequence, with earlier steps applying lighter reductions before later steps apply broader compaction.
 
-Budget reduction. (applyToolResultBudget()). Enforces per-message size limits on tool results, replacing oversized outputs with content references. Exempt tools (those where maxResultSizeChars is not finite) retain their full output. Content replacements are persisted for agent and session query sources to enable reconstruction on resume. Budget reduction runs before microcompact because microcompact operates purely by tool_use_id and never inspects content; the two compose cleanly.
+`Budget reduction`. (applyToolResultBudget()). Enforces per-message size limits on tool results, replacing oversized outputs with content references. Exempt tools (those where maxResultSizeChars is not finite) retain their full output. Content replacements are persisted for agent and session query sources to enable reconstruction on resume. Budget reduction runs before microcompact because microcompact operates purely by tool_use_id and never inspects content; the two compose cleanly.
 
-Snip. (snipCompactIfNeeded(), gated by HISTORY_SNIP). A lightweight trim that removes older history segments, returning {messages, tokensFreed, boundaryMessage}. The snipTokensFreed value is plumbed to auto-compact because the main token counter derives context size from the usage field on the most recent assistant message, and that message survives snip with its pre-snip input_tokens still attached; snip’s savings are therefore invisible to the counter unless passed through explicitly.
+`Snip`. (snipCompactIfNeeded(), gated by HISTORY_SNIP). A lightweight trim that removes older history segments, returning {messages, tokensFreed, boundaryMessage}. The snipTokensFreed value is plumbed to auto-compact because the main token counter derives context size from the usage field on the most recent assistant message, and that message survives snip with its pre-snip input_tokens still attached; snip’s savings are therefore invisible to the counter unless passed through explicitly.
 
-Microcompact. Fine-grained compression that always runs a time-based path and optionally a cache-aware path (gated by CACHED_MICROCOMPACT). When the cached path is enabled, boundary messages are deferred until after the API response so they can use actual cache_deleted_input_tokens rather than estimates. Returns {messages, compactionInfo} where compactionInfo may include pendingCacheEdits.
+`Microcompact`. Fine-grained compression that always runs a time-based path and optionally a cache-aware path (gated by CACHED_MICROCOMPACT). When the cached path is enabled, boundary messages are deferred until after the API response so they can use actual cache_deleted_input_tokens rather than estimates. Returns {messages, compactionInfo} where compactionInfo may include pendingCacheEdits.
 
-Context collapse. Gated by CONTEXT_COLLAPSE. A read-time projection over the conversation history. The source comments explain: “Nothing is yielded; the collapsed view is a read-time projection over the REPL’s full history. Summary messages live in the collapse store, not the REPL array. This is what makes collapses persist across turns.” Unlike the other shapers, context collapse does not mutate the REPL’s stored history; it replaces the messagesForQuery array with a projected view via applyCollapsesIfNeeded(), so the model sees the collapsed version while the full history remains available for reconstruction.
+`Context collapse`. Gated by CONTEXT_COLLAPSE. A read-time projection over the conversation history. The source comments explain: “Nothing is yielded; the collapsed view is a read-time projection over the REPL’s full history. Summary messages live in the collapse store, not the REPL array. This is what makes collapses persist across turns.” Unlike the other shapers, context collapse does not mutate the REPL’s stored history; it replaces the messagesForQuery array with a projected view via applyCollapsesIfNeeded(), so the model sees the collapsed version while the full history remains available for reconstruction.
 
-Auto-compact. The fifth shaper, triggering a full model-generated summary via compactConversation() in compact.ts. This function executes PreCompact hooks, creates a summary request using getCompact- Prompt(), and calls the model to produce a compressed summary. The result feeds into buildPostCompactMessages() (compact.ts). Auto-compact fires only when the context still exceeds the pressure threshold after all four previous shapers have run.
+`Auto-compact`. The fifth shaper, triggering a full model-generated summary via compactConversation() in compact.ts. This function executes PreCompact hooks, creates a summary request using getCompact- Prompt(), and calls the model to produce a compressed summary. The result feeds into buildPostCompactMessages() (compact.ts). Auto-compact fires only when the context still exceeds the pressure threshold after all four previous shapers have run.
 
-4.4 Recovery Mechanisms The query loop implements several recovery mechanisms for edge cases:
+#### 4.4 Recovery Mechanisms
 
-- Max output tokens escalation: When the response hits the output token cap, the system can retry with an escalated limit, subject to a GrowthBook flag and the absence of an existing override or environment-variable cap. Up to three recovery attempts are allowed per turn (MAX_OUTPUT_- TOKENS_RECOVERY_LIMIT = 3).
+The query loop implements several recovery mechanisms for edge cases:
 
-- Reactive compaction (gated by REACTIVE_COMPACT): When the context is near capacity, reactive compact summarizes just enough to free space. The hasAttemptedReactiveCompact flag ensures this fires at most once per turn.
+- **Max output tokens escalation**: When the response hits the output token cap, the system can retry with an escalated limit, subject to a GrowthBook flag and the absence of an existing override or environment-variable cap. Up to three recovery attempts are allowed per turn (MAX_OUTPUT_- TOKENS_RECOVERY_LIMIT = 3).
+- **Reactive compaction (gated by REACTIVE_COMPACT)**: When the context is near capacity, reactive compact summarizes just enough to free space. The hasAttemptedReactiveCompact flag ensures this fires at most once per turn.
+- **Prompt-too-long handling**: If the API returns a prompt_too_long error, the loop first attempts context-collapse overflow recovery and reactive compaction. Only after these fail does it terminate with reason: ’prompt_too_long’.
+- **Streaming fallback**: The onStreamingFallback callback handles streaming API issues, allowing the loop to retry with a different strategy.
+- **Fallback model**: The fallbackModel parameter enables switching to an alternative model if the primary model fails.
 
-- Prompt-too-long handling: If the API returns a prompt_too_long error, the loop first attempts context- collapse overflow recovery and reactive compaction. Only after these fail does it terminate with reason: ’prompt_too_long’.
+#### 4.5 Stop Conditions
 
-- Streaming fallback: The onStreamingFallback callback handles streaming API issues, allowing the loop to retry with a different strategy.
+Multiple conditions can terminate the loop:
 
-- Fallback model: The fallbackModel parameter enables switching to an alternative model if the primary model fails.
+1. **No tool use**: The model produces only text content (the primary stop condition).
+2. **Max turns**: The configurable maxTurns limit is reached.
+3. **Context overflow**: The API returns prompt_too_long.
+4. **Hook intervention**: A PostToolUse hook sets hook_stopped_continuation.
+5. **Explicit abort**: The abortController signal fires.
 
-4.5 Stop Conditions Multiple conditions can terminate the loop:
-
-1. No tool use: The model produces only text content (the primary stop condition).
-
-2. Max turns: The configurable maxTurns limit is reached.
-
-3. Context overflow: The API returns prompt_too_long.
-
-4. Hook intervention: A PostToolUse hook sets hook_stopped_continuation.
-
-5. Explicit abort: The abortController signal fires. The turn pipeline determines how tool requests are orchestrated and recovered. The next section examines the gate that determines whether each request is permitted to execute at all.
+The turn pipeline determines how tool requests are orchestrated and recovered. The next section examines the gate that determines whether each request is permitted to execute at all.
 
 ### 5 Tool Authorization and Control Boundaries
 
-Production coding agents adopt different safety architectures: layered policy enforcement, OS-level sandboxing, or version-control-based rollback. Claude Code combines the first two, implementing four design principles from Table 1: deny-first with human escalation, graduated trust spectrum, defense in depth with layered mechanisms, and reversibility-weighted risk assessment. When Claude decides to execute a tool (for example, running npm test via BashTool to reproduce the auth test failure), the request enters the permission pipeline shown in Figure 4. Every tool invocation passes through the permission system, and the default behavior is to deny or ask rather than allow silently. This default is motivated by a documented behavioral pattern: Anthropic’s auto-mode analysis (Hughes, 2026)
+Production coding agents adopt different safety architectures: layered policy enforcement, OS-level sandboxing, or version-control-based rollback. Claude Code combines the first two, implementing four design principles from Table 1: deny-first with human escalation, graduated trust spectrum, defense in depth with layered mechanisms, and reversibility-weighted risk assessment.
 
-Principle Description Progressive Trust The agent starts with minimal autonomy; users expand it by approving tool invocations that become permanent rules. Policy Core Denied Result Deny Rules Permission Decision Deny-First, Ask-by-Default Deny rules always win, even under looser modes. If no rule matches, the gate asks the user instead of silently running or blocking. Execution Environment Tools Allow Tool Use Modes Allow/ Deny User/Auto Classifier Hooks Ask Composable Policy Three mechanisms shape policy: declarative rules, global trust modes, and programmable hooks, each independently configurable.
+When Claude decides to execute a tool (for example, running npm test via BashTool to reproduce the auth test failure), the request enters the permission pipeline shown in Figure 4. Every tool invocation passes through the permission system, and the default behavior is to deny or ask rather than allow silently. This default is motivated by a documented behavioral pattern: Anthropic’s auto-mode analysis (Hughes, 2026) found that users approve approximately 93% of permission prompts, indicating that approval fatigue renders interactive confirmation behaviorally unreliable as a sole safety mechanism. Because users habitually approve without careful review, the system must maintain safety independently of human vigilance. This motivates the architectural commitment to deny-first evaluation, blanket-deny pre-filtering, and sandboxing as independent layers that operate regardless of user attentiveness.
 
 ![Figure 4 Permission gate overview and design principles.](Dive_into_Claude_Code_assets/figure-04.png)
 
-Figure 4 Permission gate overview and design principles.
+**Figure 4** Permission gate overview and design principles.
 
-found that users approve approximately 93% of permission prompts, indicating that approval fatigue renders interactive confirmation behaviorally unreliable as a sole safety mechanism. Because users habitually approve without careful review, the system must maintain safety independently of human vigilance. This motivates the architectural commitment to deny-first evaluation, blanket-deny pre-filtering, and sandboxing as independent layers that operate regardless of user attentiveness.
+#### 5.1 Permission Modes and Rule Evaluation
 
-5.1 Permission Modes and Rule Evaluation Seven permission modes exist across the type definitions (5 external modes at types/permissions.ts; auto added conditionally; bubble in the type union):
+Seven permission modes exist across the type definitions (5 external modes at types/permissions.ts; auto added conditionally; bubble in the type union):
 
-1. plan: The model must create a plan; execution proceeds only after user approval.
+1. `plan`: The model must create a plan; execution proceeds only after user approval.
+2. `default`: Standard interactive use. Most operations require user approval.
+3. `acceptEdits`: Edits within the working directory and certain filesystem shell commands (mkdir, rmdir, touch, rm, mv, cp, sed) are auto-approved; other shell commands require approval.
+4. `auto`: An ML-based classifier evaluates requests that do not pass fast-path checks (gated by TRAN- SCRIPT_CLASSIFIER).
+5. `dontAsk`: No prompting, but deny rules are still enforced.
+6. `bypassPermissions`: Skips most permission prompts, but safety-critical checks and bypass-immune rules still apply.
+7. `bubble`: Internal-only mode for subagent permission escalation to the parent terminal.
 
-2. default: Standard interactive use. Most operations require user approval.
+The five externally visible modes (acceptEdits, bypassPermissions, default, dontAsk, plan) are defined in the EXTERNAL_PERMISSION_MODES array. The auto mode is conditionally included only when the TRANSCRIPT_CLASSIFIER feature flag is active. The bubble mode exists in the type union but not in either mode array; it is used internally for subagent permission escalation (Section 8).
 
-3. acceptEdits: Edits within the working directory and certain filesystem shell commands (mkdir, rmdir, touch, rm, mv, cp, sed) are auto-approved; other shell commands require approval.
+Permission rules are evaluated in deny-first order (permissions.ts). The toolMatchesRule() function checks deny rules first: a deny rule always takes precedence over an allow rule, even when the allow rule is more specific. A broad deny (“deny all shell commands”) cannot be overridden by a narrow allow (“allow npm test”). The rule system supports tool-level matching (by tool name) and content-level matching (matching specific tool input patterns, such as Bash(prefix:npm)).
 
-4. auto: An ML-based classifier evaluates requests that do not pass fast-path checks (gated by TRAN- SCRIPT_CLASSIFIER).
+The seven modes span a graduated autonomy spectrum, from plan (user approves all plans before execution) through default and acceptEdits to bypassPermissions (minimal prompting). This gradient reflects a recurring design tension: as autonomy increases, the system must shift from interactive approval to automated safety checks. Other agent systems resolve this tension differently. SWE-Agent and OpenHands (Yang et al., 2024; Wang et al., 2024b) use Docker container isolation, sandboxing the agent’s entire execution environment rather than evaluating individual tool invocations. Aider (Gauthier, 2024) relies on Git as a safety net, making all changes reversible through version control. Claude Code’s approach layers multiple policy-enforcement mechanisms on top of optional container sandboxing, trading simplicity for fine-grained control over individual actions.
 
-5. dontAsk: No prompting, but deny rules are still enforced.
+#### 5.2 The Authorization Pipeline
 
-6. bypassPermissions: Skips most permission prompts, but safety-critical checks and bypass-immune rules still apply.
+The full authorization pipeline proceeds through several stages:
 
-7. bubble: Internal-only mode for subagent permission escalation to the parent terminal. The five externally visible modes (acceptEdits, bypassPermissions, default, dontAsk, plan) are defined in the EXTERNAL_PERMISSION_MODES array. The auto mode is conditionally included only when the TRANSCRIPT_CLASSIFIER feature flag is active. The bubble mode exists in the type union but not in either mode array; it is used internally for subagent permission escalation (Section 8). Permission rules are evaluated in deny-first order (permissions.ts). The toolMatchesRule() function checks deny rules first: a deny rule always takes precedence over an allow rule, even when the allow rule is more specific. A broad deny (“deny all shell commands”) cannot be overridden by a narrow allow (“allow npm test”). The rule system supports tool-level matching (by tool name) and content-level matching (matching specific tool input patterns, such as Bash(prefix:npm)). The seven modes span a graduated autonomy spectrum, from plan (user approves all plans before execution) through default and acceptEdits to bypassPermissions (minimal prompting). This gradient reflects a recurring design tension: as autonomy increases, the system must shift from interactive approval to automated safety checks. Other agent systems resolve this tension differently. SWE-Agent and OpenHands (Yang et al., 2024; Wang et al., 2024b) use Docker container isolation, sandboxing the agent’s entire execution environment rather than evaluating individual tool invocations. Aider (Gauthier, 2024) relies on Git as a safety net, making all changes reversible through version control. Claude Code’s approach layers multiple policy-enforcement mechanisms on top of optional container sandboxing, trading simplicity for fine-grained control over individual actions.
+*Pre-filtering*. Before any tool request reaches runtime evaluation, filterToolsByDenyRules() (tools.ts) strips blanket-denied tools from the model’s view entirely at tool pool assembly time. The documentation states: “Uses the same matcher as the runtime permission check, so MCP server-prefix rules like mcp__server strip all tools from that server before the model sees them.” This prevents the model from attempting to invoke forbidden tools, so the model does not waste calls on them.
 
-5.2 The Authorization Pipeline The full authorization pipeline proceeds through several stages:
+*PreToolUse hook*. Registered hooks fire as part of the permission pipeline. A PreToolUse hook can return a permissionDecision to deny or ask, or an updatedInput that modifies the tool’s input parameters (types/hooks.ts). A hook allow does not bypass subsequent rule-based denies or safety checks. In the interactive path, the user dialog is queued first and hooks run asynchronously; coordinator and similar background-agent paths await automated checks before showing the dialog.
 
-Pre-filtering. Before any tool request reaches runtime evaluation, filterToolsByDenyRules() (tools.ts) strips blanket-denied tools from the model’s view entirely at tool pool assembly time. The documentation states: “Uses the same matcher as the runtime permission check, so MCP server-prefix rules like mcp__server strip all tools from that server before the model sees them.” This prevents the model from attempting to invoke forbidden tools, so the model does not waste calls on them.
+*Rule evaluation*. The deny-first rule engine evaluates the request. MCP tools are matched by their fully qualified mcp__server__tool name, and server-level rules match all tools from that server.
 
-PreToolUse hook. Registered hooks fire as part of the permission pipeline. A PreToolUse hook can return a permissionDecision to deny or ask, or an updatedInput that modifies the tool’s input parameters (types/hooks.ts). A hook allow does not bypass subsequent rule-based denies or safety checks. In the interactive path, the user dialog is queued first and hooks run asynchronously; coordinator and similar background-agent paths await automated checks before showing the dialog.
+*Permission handler*. The handler in useCanUseTool.tsx branches into one of four paths based on runtime context:
 
-Rule evaluation. The deny-first rule engine evaluates the request. MCP tools are matched by their fully qualified mcp__server__tool name, and server-level rules match all tools from that server.
+1. **Coordinator**: For multi-agent coordination mode. Attempts automated resolution (classifier, hooks, rules) before falling back to user interaction.
+2. **Swarm worker**: Handles worker agents in a multi-agent swarm with their own resolution logic.
+3. **Speculative classifier**: When BASH_CLASSIFIER is enabled and the tool is BashTool, a speculative classifier races a pre-started classification result against a timeout. If the classifier returns with high confidence, the tool is approved instantly without user interaction.
+4. **Interactive**: The fallback path. Presents the standard user approval dialog through the terminal UI.
 
-Permission handler. The handler in useCanUseTool.tsx branches into one of four paths based on runtime context:
+In coordinator and some background paths, automated resolution is attempted before user interaction. In the standard interactive path, the dialog can appear first while hooks or classifier checks continue in parallel. When the classifier or a deny rule blocks an action, the system treats the denial as a routing signal rather than a hard stop: the model receives the denial reason, revises its approach, and attempts a safer alternative in the next loop iteration. The PermissionDenied hook event (Section 6) enables external code to observe and respond to these denials programmatically. This recovery-oriented design means that permission enforcement shapes the agent’s behavior rather than simply halting it.
 
-1. Coordinator: For multi-agent coordination mode. Attempts automated resolution (classifier, hooks, rules) before falling back to user interaction.
+#### 5.3 Auto-Mode Classifier and Hook Lifecycle
 
-2. Swarm worker: Handles worker agents in a multi-agent swarm with their own resolution logic.
-
-3. Speculative classifier: When BASH_CLASSIFIER is enabled and the tool is BashTool, a speculative classifier races a pre-started classification result against a timeout. If the classifier returns with high confidence, the tool is approved instantly without user interaction.
-
-4. Interactive: The fallback path. Presents the standard user approval dialog through the terminal UI. In coordinator and some background paths, automated resolution is attempted before user interaction. In the standard interactive path, the dialog can appear first while hooks or classifier checks continue in parallel. When the classifier or a deny rule blocks an action, the system treats the denial as a routing signal rather than a hard stop: the model receives the denial reason, revises its approach, and attempts a safer alternative in the next loop iteration. The PermissionDenied hook event (Section 6) enables external code to observe and respond to these denials programmatically. This recovery-oriented design means that permission enforcement shapes the agent’s behavior rather than simply halting it.
-
-5.3 Auto-Mode Classifier and Hook Lifecycle The auto-mode classifier (yoloClassifier.ts) participates in permission decisions when enabled. When TRAN- SCRIPT_CLASSIFIER is enabled, the classifier loads three prompt resources:
+The auto-mode classifier (yoloClassifier.ts) participates in permission decisions when enabled. When TRANSCRIPT_CLASSIFIER is enabled, the classifier loads three prompt resources:
 
 - A base system prompt.
-
 - An external permissions template.
+- For Anthropic-internal users, a separate internal template.
 
-- For Anthropic-internal users, a separate internal template. The classifier evaluates the proposed tool invocation against the conversation transcript and the permission tem- plate, producing an allow, deny, or request for manual approval. The function isUsingExternalPermissions() checks USER_TYPE and a forceExternalPermissions config flag to select the appropriate template. Of the 27 hook events defined in the source (coreTypes.ts), five participate directly in the permission flow, each with a specific Zod-validated output schema (types/hooks.ts):
+The classifier evaluates the proposed tool invocation against the conversation transcript and the permission template, producing an allow, deny, or request for manual approval. The function isUsingExternalPermissions() checks USER_TYPE and a forceExternalPermissions config flag to select the appropriate template.
 
-- PreToolUse: Can return permissionDecision (deny or ask, but allow does not bypass subsequent checks), permissionDecisionReason, and updatedInput (modify parameters).
+Of the 27 hook events defined in the source (coreTypes.ts), five participate directly in the permission flow, each with a specific Zod-validated output schema (types/hooks.ts):
 
-- PostToolUse: Can inject additionalContext and, for MCP tools, return updatedMCPToolOutput to modify results before they enter the context.
+- **PreToolUse**: Can return permissionDecision (deny or ask, but allow does not bypass subsequent checks), permissionDecisionReason, and updatedInput (modify parameters).
+- **PostToolUse**: Can inject additionalContext and, for MCP tools, return updatedMCPToolOutput to modify results before they enter the context.
+- **PostToolUseFailure**: Can inject additionalContext for error-specific guidance.
+- **PermissionDenied**: Can provide retry guidance after auto-mode denials.
+- **PermissionRequest**: Can return a decision of allow or deny. In coordinator and similar paths, this can resolve before the user dialog. In the standard interactive path, it can also run alongside the dialog. 
 
-- PostToolUseFailure: Can inject additionalContext for error-specific guidance.
+For non-MCP tools, the tool_result is emitted before the PostToolUse hook fires. For MCP tools, the result is delayed until after post hooks have run, enabling updatedMCPToolOutput to take effect.
 
-- PermissionDenied: Can provide retry guidance after auto-mode denials.
+#### 5.4 Shell Sandboxing
 
-- PermissionRequest: Can return a decision of allow or deny. In coordinator and similar paths, this can resolve before the user dialog. In the standard interactive path, it can also run alongside the dialog. For non-MCP tools, the tool_result is emitted before the PostToolUse hook fires. For MCP tools, the result is delayed until after post hooks have run, enabling updatedMCPToolOutput to take effect.
+Shell sandboxing provides an additional layer of protection for Bash and PowerShell commands (shouldUseSandbox.ts). The shouldUseSandbox() function checks whether sandboxing is globally enabled, whether the invocation has opted out, and whether the command matches any exclusion patterns.
 
-5.4 Shell Sandboxing Shell sandboxing provides an additional layer of protection for Bash and PowerShell commands (shouldUseSandbox.ts). The shouldUseSandbox() function checks whether sandboxing is globally enabled, whether the invocation has opted out, and whether the command matches any exclusion patterns. When active, the sandbox provides filesystem and network isolation independent of the application-level permission model. A command can be permission-approved but still sandboxed, or permission-denied and never reach the sandbox check. The two systems operate on different axes: authorization versus isolation. The layered safety architecture rests on an independence assumption: if one layer fails, others catch the violation. However, several layers share common performance constraints. Security researchers (Adversa.ai,
+When active, the sandbox provides filesystem and network isolation independent of the application-level permission model. A command can be permission-approved but still sandboxed, or permission-denied and never reach the sandbox check. The two systems operate on different axes: authorization versus isolation. 
 
-2026. have documented that commands with more than 50 subcommands fall back to a single generic approval prompt instead of running per-subcommand deny-rule checks, because per-subcommand parsing caused UI freezes. This example demonstrates that defense-in-depth can degrade when its layers share failure modes, a structural tension between safety and performance analyzed further in Section 11.3. The permission pipeline governs whether a tool request executes. The next section examines what determines which tools exist in the first place: the extensibility architecture that assembles the model’s action surface.
+The layered safety architecture rests on an independence assumption: if one layer fails, others catch the violation. However, several layers share common performance constraints. Security researchers (Adversa.ai, 2026). have documented that commands with more than 50 subcommands fall back to a single generic approval prompt instead of running per-subcommand deny-rule checks, because per-subcommand parsing caused UI freezes. This example demonstrates that defense-in-depth can degrade when its layers share failure modes, a structural tension between safety and performance analyzed further in Section 11.3. 
+
+The permission pipeline governs whether a tool request executes. The next section examines what determines which tools exist in the first place: the extensibility architecture that assembles the model’s action surface.
 
 ### 6 Extensibility: MCP, Plugins, Skills, and Hooks
 
 A recurring design question for coding agents is how to structure the extension surface: a single unified mechanism, a small number of specialized mechanisms, or a layered stack with different context costs. The analysis here illustrates two design principles from Table 1: composable multi-mechanism extensibility and externalized programmable policy. Returning to the running example, once Claude is trying to repair auth.test.ts and the earlier npm test request has been mediated by the permission system (Section 5), the next question is what extension-enabled action surface is available for the repair. When a turn begins in Claude Code, the model sees not just built-in tools like BashTool and FileReadTool, but also database query tools from an MCP server, a custom lint skill from .claude/skills/, and tools contributed by an installed plugin. These arrive through four mechanisms that extend the agent at different points of the loop: MCP servers provide external tool integration, plugins package and distribute bundles of components, skills inject domain-specific instructions, and hooks intercept the tool execution lifecycle. Anthropic’s documentation (Anthropic, 2026d) presents a broader view that includes CLAUDE.md (Section 7) and subagents (Section 8) alongside the four mechanisms analyzed here. We treat CLAUDE.md and subagents in their own sections because they operate in different subsystems (context construction and delegation, respectively), but the context-cost ordering is architecturally significant: it reveals how each extension point trades off expressiveness against the bounded context window.
 
-6.1 Four Extension Mechanisms The mechanisms are implemented in distinct source directories (Figure 5) and serve different integration patterns:
+#### 6.1 Four Extension Mechanisms
 
-MCP servers. The Model Context Protocol is the primary external tool integration path. MCP servers are configured from multiple scopes: project, user, local, and enterprise, with additional plugin and claude.ai servers merged at runtime (services/mcp/config.ts). The MCP client (services/mcp/client.ts) supports multiple transport types: stdio, SSE, HTTP, WebSocket, SDK, plus IDE-specific variants (sse-ide, ws-ide) and
+The mechanisms are implemented in distinct source directories (Figure 5) and serve different integration patterns:
 
-b model(): what the model can reach # one turn of Claude Code’s agent loop while not stopped: Element What it does # a assemble -- build what the model sees context = assemble( Built-in tools Read / Edit / Bash / . . . shipped with the CLI MCP tools Tools from any MCP server, in the same flat pool SkillTool Meta-tool that launches a skill by name AgentTool Meta-tool that spawns a sub-agent recursively system_prompt, # instructions header tool_schemas, # callable tool signatures history, # prior turn messages hook_additions, # pushed in by hooks ) # b model -- pick the next action action = model(context, tools) # flat tool pool if action.is_text_only(): stopped = run_stop_hooks(action) # may veto continue # c execute -- gate and run the tool call if not permitted(action): # permission continue action = run_pre_tool_hooks(action) # block/rewrite result = execute(action) # tool runs here result = run_post_tool_hooks(result) # mutate/annotate history.append(action, result) c execute(): whether / how an action runs Element What it does Permission rules Declarative allow / deny / ask per call PreToolUse hook Approve / block / rewrite a tool call PostToolUse hook Mutate output or inject context after a call Stop hook Force the loop to keep going at model stop SubagentStop hook Same, for sub-agents spawned via AgentTool Notification hook External side effects on user notifications a assemble(): what the model sees Element What it does CLAUDE.md files Loaded into context; files above the working directory load at startup, and subdirectory files load on demand Skill descriptions Advertises skills so the model calls SkillTool MCP resources & prompts Non-tool content an MCP server pushes Output style Replaces the responseformatting system block UserPromptSubmit hook Inject context, or block, on every user turn SessionStart hook One-shot context injection at session start
+*MCP servers*. The Model Context Protocol is the primary external tool integration path. MCP servers are configured from multiple scopes: project, user, local, and enterprise, with additional plugin and claude.ai servers merged at runtime (services/mcp/config.ts). The MCP client (services/mcp/client.ts) supports multiple transport types: stdio, SSE, HTTP, WebSocket, SDK, plus IDE-specific variants (sse-ide, ws-ide) and an internal claudeai-proxy. Each connected server contributes tool definitions as MCPTool objects. Dedicated built-in tools ListMcpResourcesTool and ReadMcpResourceTool provide access to MCP resources.
 
-![Figure 5 Where Claude Code’s extension mechanisms plug into the agent loop. The pseudocode on the left is a zoom-in of the Agent Loop block in Figure 1. Every agent loop has three injection points: a assemble() controls what the model sees, b model() controls what it can reach, and c execute() controls whether and how an action actually runs.](Dive_into_Claude_Code_assets/figure-05.png)
+![Figure 5](Dive_into_Claude_Code_assets/figure-05.png)
 
 Figure 5 Where Claude Code’s extension mechanisms plug into the agent loop. The pseudocode on the left is a zoom-in of the Agent Loop block in Figure 1. Every agent loop has three injection points: a assemble() controls what the model sees, b model() controls what it can reach, and c execute() controls whether and how an action actually runs.
 
-an internal claudeai-proxy. Each connected server contributes tool definitions as MCPTool objects. Dedicated built-in tools ListMcpResourcesTool and ReadMcpResourceTool provide access to MCP resources.
+*Plugins*. Plugins serve a dual role: they are both a packaging format and a distribution mechanism. The PluginManifestSchema (utils/plugins/schemas.ts) accepts ten component types: commands, agents, skills, hooks, MCP servers, LSP servers, output styles, channels, settings, and user configuration. The plugin loader (utils/plugins/pluginLoader.ts) validates manifests and routes each component to its respective registry: commands and skills surface through the SkillTool meta-tool, agents appear in definitions consumed by AgentTool, hooks merge into the hook registry, MCP and LSP servers fold into their standard configurations, and output styles modify response formatting. A single plugin package can therefore extend Claude Code across multiple component types simultaneously, making plugins the primary distribution vehicle for third-party extensions.
 
-Plugins. Plugins serve a dual role: they are both a packaging format and a distribution mechanism. The PluginManifestSchema (utils/plugins/schemas.ts) accepts ten component types: commands, agents, skills, hooks, MCP servers, LSP servers, output styles, channels, settings, and user configuration. The plugin loader (utils/plugins/pluginLoader.ts) validates manifests and routes each component to its respective registry: commands and skills surface through the SkillTool meta-tool, agents appear in definitions consumed by AgentTool, hooks merge into the hook registry, MCP and LSP servers fold into their standard configurations, and output styles modify response formatting. A single plugin package can therefore extend Claude Code across multiple component types simultaneously, making plugins the primary distribution vehicle for third-party extensions.
+*Skills*. Each skill is defined by a SKILL.md file with YAML frontmatter. The parseSkillFrontmatterFields() function (loadSkillsDir.ts) parses 15+ fields including display name, description, allowed tools (granting the skill access to additional tools), argument hints, model overrides, execution context (’fork’ for isolated execution), associated agent definitions, effort levels, and shell configuration. Skills can define their own hooks, which register dynamically on invocation. Bundled skills are registered in-memory at startup. When invoked, the SkillTool meta-tool injects the skill’s instructions into the context.
 
-Skills. Each skill is defined by a SKILL.md file with YAML frontmatter. The parseSkillFrontmatterFields() function (loadSkillsDir.ts) parses 15+ fields including display name, description, allowed tools (granting the skill access to additional tools), argument hints, model overrides, execution context (’fork’ for isolated execution), associated agent definitions, effort levels, and shell configuration. Skills can define their own hooks, which register dynamically on invocation. Bundled skills are registered in-memory at startup. When invoked, the SkillTool meta-tool injects the skill’s instructions into the context.
+*Hooks*. The source code defines 27 hook events spanning tool authorization (PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, PermissionDenied), session lifecycle (SessionStart, SessionEnd, Setup, Stop, StopFailure), user interaction (UserPromptSubmit, Elicitation, ElicitationResult), subagent coordination (SubagentStart, SubagentStop, TeammateIdle, TaskCreated, TaskCompleted), context management (PreCompact, PostCompact, InstructionsLoaded, ConfigChange), workspace events (CwdChanged, FileChanged, WorktreeCreate, WorktreeRemove), and notifications (coreTypes.ts, coreSchemas.ts). Of these, 15 have event-specific output schemas with rich fields supporting permission decisions, context injection, input modification, MCP result transformation, and retry control (types/hooks.ts). Persisted hook commands configured via settings and plugins use four command types: shell commands (type: command), LLM prompt hooks (type: prompt), HTTP hooks (type: http), and agentic verifier hooks (type: agent) (schemas/hooks.ts). The runtime additionally supports non-persistable callback hooks (type: callback) used by the SDK and internal instrumentation (types/hooks.ts). Hook sources include settings.json, plugins, and managed policy at startup; skill hooks register dynamically on invocation (utils/hooks.ts). The five tool-authorization events are detailed in Section 5.3.
 
-Hooks. The source code defines 27 hook events spanning tool authorization (PreToolUse, PostToolUse, Post- ToolUseFailure, PermissionRequest, PermissionDenied), session lifecycle (SessionStart, SessionEnd, Setup, Stop, StopFailure), user interaction (UserPromptSubmit, Elicitation, ElicitationResult), subagent coordination (SubagentStart, SubagentStop, TeammateIdle, TaskCreated, TaskCompleted), context management (PreCompact, PostCompact, InstructionsLoaded, ConfigChange), workspace events (CwdChanged, FileChanged, WorktreeCreate, WorktreeRemove), and notifications (coreTypes.ts, coreSchemas.ts). Of these, 15 have event-specific output schemas with rich fields supporting permission decisions, context injection, input modification, MCP result transformation, and retry control (types/hooks.ts). Persisted hook commands configured via settings and plugins use four command types: shell commands (type: command), LLM prompt hooks (type: prompt), HTTP hooks (type: http), and agentic verifier hooks (type: agent) (schemas/hooks.ts). The runtime additionally supports non-persistable callback hooks (type: callback) used by the SDK and internal instrumentation (types/hooks.ts). Hook sources include settings.json, plugins, and managed policy at startup; skill hooks register dynamically on invocation (utils/hooks.ts). The five tool-authorization events are detailed in Section 5.3.
+#### 6.2 Tool Pool Assembly
 
-6.2 Tool Pool Assembly The assembleToolPool() function at tools.ts is documented as “the single source of truth for combining built-in tools with MCP tools.” The assembly follows a five-step pipeline:
+The assembleToolPool() function at tools.ts is documented as “the single source of truth for combining built-in tools with MCP tools.” The assembly follows a five-step pipeline:
 
-1. Base tool enumeration. getAllBaseTools() (tools.ts) returns an array of up to 54 tools: 19 are always included (such as BashTool, FileReadTool, AgentTool, SkillTool), and 35 more are conditionally included based on feature flags, environment variables, and user type. Anthropic-internal users get additional internal tools. Worktree mode enables EnterWorktreeTool and ExitWorktreeTool. Agent swarms enable team tools. When embedded search tools are available in the Bun binary, dedicated GlobTool and GrepTool are omitted.
+1. **Base tool enumeration**. getAllBaseTools() (tools.ts) returns an array of up to 54 tools: 19 are always included (such as BashTool, FileReadTool, AgentTool, SkillTool), and 35 more are conditionally included based on feature flags, environment variables, and user type. Anthropic-internal users get additional internal tools. Worktree mode enables EnterWorktreeTool and ExitWorktreeTool. Agent swarms enable team tools. When embedded search tools are available in the Bun binary, dedicated GlobTool and GrepTool are omitted.
+2. **Mode filtering**. getTools() (tools.ts) applies mode-specific filtering. In CLAUDE_CODE_SIMPLE mode, only Bash, Read, and Edit are available (or REPLTool in the REPL branch; plus coordinator tools if applicable). Each tool’s isEnabled() method is called for runtime availability checks.
+3. **Deny rule pre-filtering**. filterToolsByDenyRules() (tools.ts) strips blanket-denied tools from the model’s view before any call.
+4. **MCP tool integration**. MCP tools from appState.mcp.tools are filtered by deny rules and merged with built-in tools.
+5. **Deduplication**. Tools are deduplicated by name, with built-in tools taking precedence over MCP tools.
 
-2. Mode filtering. getTools() (tools.ts) applies mode-specific filtering. In CLAUDE_CODE_SIMPLE mode, only Bash, Read, and Edit are available (or REPLTool in the REPL branch; plus coordinator tools if applicable). Each tool’s isEnabled() method is called for runtime availability checks.
+Both REPL.tsx (via the useMergedTools hook) and AgentTool.tsx (when building the worker tool set) invoke this function, ensuring consistent assembly across all execution paths. At request time, deferred tools may be hidden from the model’s context until explicitly queried via ToolSearch (tools.ts). Agent-based extension (custom agent definitions via .claude/agents/*.md and plugin-contributed agents) is covered in Section 8, because agents differ fundamentally from the four mechanisms above: they create new, isolated context windows rather than extending the current one.
 
-3. Deny rule pre-filtering. filterToolsByDenyRules() (tools.ts) strips blanket-denied tools from the model’s view before any call.
+#### 6.3 Why Four Mechanisms?
 
-4. MCP tool integration. MCP tools from appState.mcp.tools are filtered by deny rules and merged with built-in tools.
+Given that each additional extension mechanism increases the surface area developers must learn, a natural question is why Claude Code uses four distinct mechanisms rather than consolidating into one or two. The answer lies in the observation that different kinds of extensibility impose different costs on the context window, and a single mechanism cannot span the full range from zero-context lifecycle hooks to schema-heavy tool servers without forcing unnecessary trade-offs on extension authors.
 
-5. Deduplication. Tools are deduplicated by name, with built-in tools taking precedence over MCP tools. Both REPL.tsx (via the useMergedTools hook) and AgentTool.tsx (when building the worker tool set) invoke this function, ensuring consistent assembly across all execution paths. At request time, deferred tools may be hidden from the model’s context until explicitly queried via ToolSearch (tools.ts). Agent-based extension (custom agent definitions via .claude/agents/*.md and plugin-contributed agents) is covered in Section 8, because agents differ fundamentally from the four mechanisms above: they create new, isolated context windows rather than extending the current one.
+As Table 2 summarizes, each mechanism trades deployment complexity for a different kind of extensibility. MCP servers provide runtime tool integration (the model gains new callable tools) at the cost of server management overhead and context budget consumed by tool schemas. Skills shape how the agent thinks (not just what tools it has) at minimal context cost, since only frontmatter descriptions (not full content) stay in the prompt. Hooks provide cross-cutting lifecycle control (blocking, rewriting, or annotating tool calls) with no context footprint by default, though hooks can opt into injecting additional context. Plugins bundle any
 
-6.3 Why Four Mechanisms? Given that each additional extension mechanism increases the surface area developers must learn, a natural question is why Claude Code uses four distinct mechanisms rather than consolidating into one or two. The answer lies in the observation that different kinds of extensibility impose different costs on the context window, and a single mechanism cannot span the full range from zero-context lifecycle hooks to schema-heavy tool servers without forcing unnecessary trade-offs on extension authors. As Table 2 summarizes, each mechanism trades deployment complexity for a different kind of extensibility. MCP servers provide runtime tool integration (the model gains new callable tools) at the cost of server management overhead and context budget consumed by tool schemas. Skills shape how the agent thinks (not just what tools it has) at minimal context cost, since only frontmatter descriptions (not full content) stay in the prompt. Hooks provide cross-cutting lifecycle control (blocking, rewriting, or annotating tool calls) with no context footprint by default, though hooks can opt into injecting additional context. Plugins bundle any
+**Table 2** What each extension mechanism uniquely provides. Context cost refers to how much of the bounded context window the mechanism consumes when active.
 
-Table 2 What each extension mechanism uniquely provides. Context cost refers to how much of the bounded context window the mechanism consumes when active.
+|Mechanism| Unique Capability |Context Cost |Insertion Point |
+|-|-|-|-|
+|MCP servers |External service integration (multi-transport) |High (tool schemas)|model():tool pool 
+|Plugins |Multi-component packaging + distribution |Medium (varies) |All three points 
+|Skills |Domain-specific instructions + meta-tool invocation|Low (descriptions only) |assemble():context injection|
+| Hooks |Lifecycle interception + event-driven automation |Zero by default |execute():pre/post tool|
 
-Mechanism Unique Capability Context Cost Insertion Point MCP servers External service integration (multi-transport) High (tool schemas) model():tool pool Plugins Multi-component packaging + distribution Medium (varies) All three points Skills Domain-specific instructions + meta-tool invocation Low (descriptions only) assemble():context injection Hooks Lifecycle interception + event-driven automation Zero by default execute():pre/post tool
+combination of the other three into distributable packages, acting as the packaging and distribution layer rather than a distinct runtime primitive. The graduated context-cost ordering (zero for hooks, low for skills, medium for plugins, high for MCP) means that cheap extensions can scale widely without exhausting the context window, while expensive ones are reserved for cases that genuinely require new tool surfaces.
 
-combination of the other three into distributable packages, acting as the packaging and distribution layer rather than a distinct runtime primitive. The graduated context-cost ordering (zero for hooks, low for skills, medium for plugins, high for MCP) means that cheap extensions can scale widely without exhausting the context window, while expensive ones are reserved for cases that genuinely require new tool surfaces. Some agent frameworks provide a single extension mechanism, typically a tool-only API where all customization arrives as additional callable tools. Others use two tiers, separating tools from configuration or instruction injection. Claude Code’s four-mechanism approach can accommodate a broader range of extension patterns, from zero-context event handlers to full external service integrations, but it increases the learning curve developers face when deciding which mechanism to use for a given integration task.
+Some agent frameworks provide a single extension mechanism, typically a tool-only API where all customization arrives as additional callable tools. Others use two tiers, separating tools from configuration or instruction injection. Claude Code’s four-mechanism approach can accommodate a broader range of extension patterns, from zero-context event handlers to full external service integrations, but it increases the learning curve developers face when deciding which mechanism to use for a given integration task.
 
 ### 7 Context Construction and Memory
 

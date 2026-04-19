@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Code — Tool Authorization Pipeline (§5.2)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #faf7f2;
+      --color-paper-2: #f2ede4;
+      --color-ink:     #1c1917;
+      --color-muted:   #57534e;
+      --color-soft:    #78716c;
+      --color-accent:  #b5523a;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 1.5rem;
+    }
+
+    .frame { max-width: 1320px; width: 100%; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      font-family: var(--font-sans);
+      font-size: 0.92rem;
+      color: var(--color-muted);
+      margin-bottom: 1.5rem;
+      max-width: 880px;
+    }
+
+    svg { width: 100%; min-width: 1100px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Flowchart · Dive into Claude Code · §5.2</p>
+    <h1>The tool authorization pipeline</h1>
+    <p class="subtitle">Every tool invocation traverses three runtime stages — PreToolUse hook, rule evaluation, permission handler — after upstream pool-level pre-filtering. The handler routes to one of four context-specific paths before producing an allow / ask / deny decision.</p>
+
+    <svg viewBox="0 0 1280 960" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+          <circle cx="1" cy="1" r="0.9" fill="rgba(28,25,23,0.10)"/>
+        </pattern>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#57534e"/>
+        </marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#b5523a"/>
+        </marker>
+        <marker id="arrow-soft" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#78716c"/>
+        </marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#faf7f2"/>
+      <rect width="100%" height="100%" fill="url(#dots)" opacity="0.5"/>
+
+      <!-- ===================== ARROWS (drawn first, behind boxes) ===================== -->
+
+      <!-- Pre-filter upstream dashed connector -->
+      <line x1="360" y1="92" x2="520" y2="148" stroke="#78716c" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-soft)"/>
+
+      <!-- Entry → PreToolUse -->
+      <line x1="640" y1="184" x2="640" y2="208" stroke="#57534e" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- PreToolUse → Rule eval -->
+      <line x1="640" y1="280" x2="640" y2="304" stroke="#57534e" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- Rule eval → Handler entry -->
+      <line x1="640" y1="384" x2="640" y2="408" stroke="#57534e" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- PreToolUse early-deny sidearm to DENY outcome -->
+      <polyline points="760,244 860,244 860,712" fill="none" stroke="#78716c" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-soft)"/>
+      <!-- Rule eval early-deny sidearm -->
+      <polyline points="760,340 900,340 900,712" fill="none" stroke="#78716c" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-soft)"/>
+
+      <!-- Handler entry → 4 branch paths (fan-out) -->
+      <line x1="580" y1="464" x2="178" y2="496" stroke="#57534e" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="600" y1="464" x2="486" y2="496" stroke="#57534e" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="680" y1="464" x2="794" y2="496" stroke="#b5523a" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <line x1="700" y1="464" x2="1102" y2="496" stroke="#57534e" stroke-width="1" marker-end="url(#arrow)"/>
+
+      <!-- Branch paths → convergence dot at (640, 640) -->
+      <line x1="178" y1="608" x2="628" y2="636" stroke="#57534e" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="486" y1="608" x2="636" y2="636" stroke="#57534e" stroke-width="1" marker-end="url(#arrow)"/>
+      <line x1="794" y1="608" x2="644" y2="636" stroke="#b5523a" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <line x1="1102" y1="608" x2="652" y2="636" stroke="#57534e" stroke-width="1" marker-end="url(#arrow)"/>
+
+      <!-- Convergence → decision -->
+      <line x1="640" y1="648" x2="640" y2="672" stroke="#57534e" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- Decision → 3 outcomes -->
+      <line x1="600" y1="712" x2="440" y2="756" stroke="#57534e" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="640" y1="720" x2="640" y2="756" stroke="#57534e" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="680" y1="712" x2="840" y2="756" stroke="#57534e" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- Outcomes → effects -->
+      <line x1="440" y1="812" x2="440" y2="844" stroke="#57534e" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="640" y1="812" x2="640" y2="844" stroke="#57534e" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="840" y1="812" x2="840" y2="844" stroke="#57534e" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- Deny → Routing loopback to entry -->
+      <polyline points="840,892 1160,892 1160,156 760,156" fill="none" stroke="#b5523a" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+
+      <!-- ===================== ARROW LABELS ===================== -->
+
+      <rect x="800" y="234" width="64" height="12" rx="2" fill="#faf7f2"/>
+      <text x="832" y="244" fill="#78716c" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">DENY / ASK</text>
+
+      <rect x="820" y="330" width="80" height="12" rx="2" fill="#faf7f2"/>
+      <text x="860" y="340" fill="#78716c" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">DENY</text>
+
+      <rect x="380" y="96" width="148" height="12" rx="2" fill="#faf7f2"/>
+      <text x="454" y="106" fill="#78716c" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">AT POOL ASSEMBLY</text>
+
+      <rect x="1040" y="480" width="72" height="12" rx="2" fill="#faf7f2"/>
+      <text x="1076" y="490" fill="#57534e" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">FALLBACK</text>
+
+      <rect x="1116" y="860" width="88" height="12" rx="2" fill="#faf7f2"/>
+      <text x="1160" y="870" fill="#b5523a" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">ROUTING SIGNAL</text>
+
+      <rect x="608" y="288" width="64" height="12" rx="2" fill="#faf7f2"/>
+      <text x="640" y="298" fill="#57534e" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ALLOW →</text>
+
+      <rect x="608" y="390" width="64" height="12" rx="2" fill="#faf7f2"/>
+      <text x="640" y="400" fill="#57534e" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ALLOW →</text>
+
+      <!-- ===================== PRE-FILTERING (UPSTREAM NOTE) ===================== -->
+
+      <rect x="40" y="48" width="320" height="80" rx="8" fill="rgba(28,25,23,0.04)" stroke="rgba(28,25,23,0.18)" stroke-width="0.8" stroke-dasharray="4,3"/>
+      <text x="56" y="68" fill="#57534e" font-size="9" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.16em">STAGE 0 · UPSTREAM</text>
+      <text x="56" y="92" fill="#1c1917" font-size="13" font-weight="600" font-family="'Geist', sans-serif">Pre-filtering</text>
+      <text x="56" y="108" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace">filterToolsByDenyRules() · tools.ts</text>
+      <text x="56" y="122" fill="#78716c" font-size="9" font-family="'Geist', sans-serif">Blanket-denied tools removed from model's view</text>
+
+      <!-- ===================== MAIN TRUNK ===================== -->
+
+      <!-- Entry: Tool request -->
+      <rect x="520" y="136" width="240" height="48" rx="24" fill="rgba(28,25,23,0.03)" stroke="rgba(28,25,23,0.30)" stroke-width="1"/>
+      <text x="640" y="156" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Tool request</text>
+      <text x="640" y="172" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">model emits tool_use block</text>
+
+      <!-- Stage 1: PreToolUse hook -->
+      <rect x="520" y="208" width="240" height="72" rx="6" fill="#faf7f2"/>
+      <rect x="520" y="208" width="240" height="72" rx="6" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <rect x="528" y="216" width="56" height="12" rx="2" fill="transparent" stroke="rgba(28,25,23,0.40)" stroke-width="0.8"/>
+      <text x="556" y="225" fill="#57534e" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">STAGE 1</text>
+      <text x="640" y="248" fill="#1c1917" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">PreToolUse hook</text>
+      <text x="640" y="264" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">types/hooks.ts</text>
+      <text x="640" y="276" fill="#78716c" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">may return deny / ask / updatedInput</text>
+
+      <!-- Stage 2: Rule evaluation (security style) -->
+      <rect x="520" y="304" width="240" height="80" rx="6" fill="#faf7f2"/>
+      <rect x="520" y="304" width="240" height="80" rx="6" fill="rgba(181,82,58,0.05)" stroke="rgba(181,82,58,0.55)" stroke-width="1.2" stroke-dasharray="4,4"/>
+      <rect x="528" y="312" width="56" height="12" rx="2" fill="transparent" stroke="rgba(181,82,58,0.50)" stroke-width="0.8"/>
+      <text x="556" y="321" fill="#b5523a" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">STAGE 2</text>
+      <text x="640" y="344" fill="#1c1917" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Rule evaluation</text>
+      <text x="640" y="360" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">permissions.ts · deny-first</text>
+      <text x="640" y="376" fill="#78716c" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">MCP: mcp__server__tool · server-level rules</text>
+
+      <!-- Stage 3: Permission handler (entry) -->
+      <rect x="520" y="408" width="240" height="56" rx="6" fill="#faf7f2"/>
+      <rect x="520" y="408" width="240" height="56" rx="6" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <rect x="528" y="416" width="56" height="12" rx="2" fill="transparent" stroke="rgba(28,25,23,0.40)" stroke-width="0.8"/>
+      <text x="556" y="425" fill="#57534e" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">STAGE 3</text>
+      <text x="640" y="445" fill="#1c1917" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Permission handler</text>
+      <text x="640" y="459" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">useCanUseTool.tsx · 4 runtime paths</text>
+
+      <!-- ===================== 4 HANDLER BRANCHES (fan-out) ===================== -->
+
+      <!-- Branch 1: Coordinator -->
+      <rect x="44" y="496" width="268" height="112" rx="6" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <rect x="52" y="504" width="64" height="12" rx="2" fill="transparent" stroke="rgba(28,25,23,0.40)" stroke-width="0.8"/>
+      <text x="84" y="513" fill="#57534e" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">PATH 1</text>
+      <text x="178" y="540" fill="#1c1917" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Coordinator</text>
+      <text x="178" y="558" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">multi-agent mode</text>
+      <text x="178" y="574" fill="#78716c" font-size="9" font-family="'Geist', sans-serif" text-anchor="middle">auto resolution first:</text>
+      <text x="178" y="588" fill="#78716c" font-size="9" font-family="'Geist', sans-serif" text-anchor="middle">classifier · hooks · rules</text>
+      <text x="178" y="602" fill="#78716c" font-size="9" font-family="'Geist', sans-serif" text-anchor="middle">fallback: user dialog</text>
+
+      <!-- Branch 2: Swarm worker -->
+      <rect x="352" y="496" width="268" height="112" rx="6" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <rect x="360" y="504" width="64" height="12" rx="2" fill="transparent" stroke="rgba(28,25,23,0.40)" stroke-width="0.8"/>
+      <text x="392" y="513" fill="#57534e" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">PATH 2</text>
+      <text x="486" y="540" fill="#1c1917" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Swarm Worker</text>
+      <text x="486" y="558" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">worker in swarm</text>
+      <text x="486" y="574" fill="#78716c" font-size="9" font-family="'Geist', sans-serif" text-anchor="middle">own resolution logic</text>
+      <text x="486" y="588" fill="#78716c" font-size="9" font-family="'Geist', sans-serif" text-anchor="middle">delegated to swarm</text>
+      <text x="486" y="602" fill="#78716c" font-size="9" font-family="'Geist', sans-serif" text-anchor="middle">coordinator protocol</text>
+
+      <!-- Branch 3: Speculative classifier (FOCAL CORAL) -->
+      <rect x="660" y="496" width="268" height="112" rx="6" fill="#faf7f2"/>
+      <rect x="660" y="496" width="268" height="112" rx="6" fill="rgba(181,82,58,0.08)" stroke="#b5523a" stroke-width="1.2"/>
+      <rect x="668" y="504" width="64" height="12" rx="2" fill="transparent" stroke="rgba(181,82,58,0.50)" stroke-width="0.8"/>
+      <text x="700" y="513" fill="#b5523a" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">PATH 3</text>
+      <text x="794" y="540" fill="#1c1917" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Speculative Classifier</text>
+      <text x="794" y="558" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">BASH_CLASSIFIER + BashTool</text>
+      <text x="794" y="574" fill="#78716c" font-size="9" font-family="'Geist', sans-serif" text-anchor="middle">races pre-started result</text>
+      <text x="794" y="588" fill="#78716c" font-size="9" font-family="'Geist', sans-serif" text-anchor="middle">vs. timeout</text>
+      <text x="794" y="602" fill="#b5523a" font-size="9" font-family="'Geist', sans-serif" text-anchor="middle" font-weight="600">high confidence → instant allow</text>
+
+      <!-- Branch 4: Interactive (fallback) -->
+      <rect x="968" y="496" width="268" height="112" rx="6" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <rect x="976" y="504" width="64" height="12" rx="2" fill="transparent" stroke="rgba(28,25,23,0.40)" stroke-width="0.8"/>
+      <text x="1008" y="513" fill="#57534e" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">PATH 4</text>
+      <text x="1102" y="540" fill="#1c1917" font-size="13" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Interactive</text>
+      <text x="1102" y="558" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">standard fallback</text>
+      <text x="1102" y="574" fill="#78716c" font-size="9" font-family="'Geist', sans-serif" text-anchor="middle">user approval dialog</text>
+      <text x="1102" y="588" fill="#78716c" font-size="9" font-family="'Geist', sans-serif" text-anchor="middle">terminal UI</text>
+      <text x="1102" y="602" fill="#78716c" font-size="9" font-family="'Geist', sans-serif" text-anchor="middle">hooks run in parallel</text>
+
+      <!-- ===================== CONVERGENCE + DECISION ===================== -->
+
+      <!-- Convergence merge dot -->
+      <circle cx="640" cy="640" r="6" fill="#1c1917"/>
+
+      <!-- Decision diamond -->
+      <polygon points="640,672 720,712 640,752 560,712" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <text x="640" y="706" fill="#57534e" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">DECISION</text>
+      <text x="640" y="722" fill="#1c1917" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">allow / ask / deny</text>
+
+      <!-- ===================== OUTCOMES ===================== -->
+
+      <!-- Allow -->
+      <rect x="340" y="756" width="200" height="56" rx="6" fill="#faf7f2"/>
+      <rect x="340" y="756" width="200" height="56" rx="6" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <text x="440" y="778" fill="#57534e" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.18em">ALLOW</text>
+      <text x="440" y="798" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Tool executes</text>
+
+      <!-- Ask -->
+      <rect x="540" y="756" width="200" height="56" rx="6" fill="#faf7f2"/>
+      <rect x="540" y="756" width="200" height="56" rx="6" fill="rgba(87,83,78,0.10)" stroke="#78716c" stroke-width="1"/>
+      <text x="640" y="778" fill="#57534e" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.18em">ASK</text>
+      <text x="640" y="798" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">User dialog</text>
+
+      <!-- Deny -->
+      <rect x="740" y="756" width="200" height="56" rx="6" fill="#faf7f2"/>
+      <rect x="740" y="756" width="200" height="56" rx="6" fill="rgba(181,82,58,0.05)" stroke="rgba(181,82,58,0.55)" stroke-width="1" stroke-dasharray="4,4"/>
+      <text x="840" y="778" fill="#b5523a" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.18em">DENY</text>
+      <text x="840" y="798" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Blocked</text>
+
+      <!-- ===================== EFFECTS ===================== -->
+
+      <!-- Execute -->
+      <rect x="340" y="844" width="200" height="48" rx="24" fill="rgba(28,25,23,0.03)" stroke="rgba(28,25,23,0.30)" stroke-width="1"/>
+      <text x="440" y="864" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Execute</text>
+      <text x="440" y="880" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">tool result → conversation</text>
+
+      <!-- Dialog -->
+      <rect x="540" y="844" width="200" height="48" rx="24" fill="rgba(28,25,23,0.03)" stroke="rgba(28,25,23,0.30)" stroke-width="1"/>
+      <text x="640" y="864" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Prompt user</text>
+      <text x="640" y="880" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">terminal dialog</text>
+
+      <!-- Routing signal -->
+      <rect x="740" y="844" width="200" height="48" rx="24" fill="rgba(181,82,58,0.08)" stroke="#b5523a" stroke-width="1"/>
+      <text x="840" y="864" fill="#1c1917" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Routing signal</text>
+      <text x="840" y="880" fill="#57534e" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">model revises · next turn</text>
+
+      <!-- PermissionDenied hook note -->
+      <rect x="968" y="756" width="268" height="100" rx="8" fill="rgba(28,25,23,0.04)" stroke="rgba(28,25,23,0.18)" stroke-width="0.8" stroke-dasharray="4,3"/>
+      <text x="984" y="776" fill="#57534e" font-size="9" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.16em">DENIAL AS ROUTING</text>
+      <text x="984" y="798" fill="#1c1917" font-size="11" font-weight="500" font-family="'Geist', sans-serif">PermissionDenied hook</text>
+      <text x="984" y="814" fill="#78716c" font-size="9" font-family="'Geist', sans-serif">Observes auto-mode denials.</text>
+      <text x="984" y="828" fill="#78716c" font-size="9" font-family="'Geist', sans-serif">Denials shape behavior —</text>
+      <text x="984" y="842" fill="#78716c" font-size="9" font-family="'Geist', sans-serif">not halt it. Model retries safer.</text>
+
+      <!-- ===================== LEGEND ===================== -->
+      <line x1="40" y1="912" x2="1240" y2="912" stroke="rgba(28,25,23,0.12)" stroke-width="0.8"/>
+      <text x="40" y="930" fill="#57534e" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+
+      <rect x="40" y="944" width="24" height="12" rx="6" fill="rgba(28,25,23,0.03)" stroke="rgba(28,25,23,0.30)" stroke-width="1"/>
+      <text x="72" y="954" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Start / end</text>
+
+      <rect x="160" y="944" width="24" height="12" rx="2" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <text x="192" y="954" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Pipeline stage</text>
+
+      <rect x="300" y="944" width="24" height="12" rx="2" fill="rgba(181,82,58,0.08)" stroke="#b5523a" stroke-width="1"/>
+      <text x="332" y="954" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Focal · speculative path</text>
+
+      <rect x="488" y="944" width="24" height="12" rx="2" fill="rgba(181,82,58,0.05)" stroke="rgba(181,82,58,0.55)" stroke-width="1" stroke-dasharray="3,3"/>
+      <text x="520" y="954" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Deny-first / blocked</text>
+
+      <polygon points="672,950 684,944 696,950 684,956" fill="#ffffff" stroke="#1c1917" stroke-width="1"/>
+      <text x="708" y="954" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Decision</text>
+
+      <line x1="800" y1="950" x2="828" y2="950" stroke="#b5523a" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <text x="836" y="954" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Fast-path / routing</text>
+
+      <line x1="980" y1="950" x2="1008" y2="950" stroke="#57534e" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <text x="1016" y="954" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Control flow</text>
+
+      <line x1="1120" y1="950" x2="1148" y2="950" stroke="#78716c" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-soft)"/>
+      <text x="1156" y="954" fill="#57534e" font-size="9" font-family="'Geist', sans-serif">Early exit</text>
+    </svg>
+  </div>
+</body>
+</html>
